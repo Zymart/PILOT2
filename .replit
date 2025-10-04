@@ -1,0 +1,11 @@
+run = "npm start"
+entrypoint = "index.js"
+
+[nix]
+channel = "stable-22_11"
+
+[[nix.packages]]
+name = "nodejs"
+
+[deployment]
+run = ["node", "index.js"]
