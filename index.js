@@ -1,3 +1,8 @@
+// Fix for ReadableStream error in Replit
+if (!global.ReadableStream) {
+  global.ReadableStream = require('stream/web').ReadableStream;
+}
+
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 
 const client = new Client({
@@ -570,7 +575,7 @@ client.on('interactionCreate', async (interaction) => {
           .setCustomId('close_ticket')
           .setLabel('Close Ticket')
           .setEmoji('🔒')
-          .setStyle(ButtonStyle.Danger);
+        .setStyle(ButtonStyle.Danger);
 
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
 
