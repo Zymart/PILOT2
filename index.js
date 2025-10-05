@@ -19,6 +19,9 @@ const PREFIX = '!';
 const ticketCategories = new Map();
 const orderChannels = new Map();
 const doneChannels = new Map();
+const adminUsers = new Map(); // Store admins per server
+
+const OWNER_ID = '730629579533844512';
 
 client.once('ready', () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
@@ -30,6 +33,84 @@ client.on('messageCreate', async (message) => {
 
   const args = message.content.slice(PREFIX.length).trim().split(/ +/);
   const command = args.shift().toLowerCase();
+
+  // Check if user is owner or admin
+  const isOwner = message.author.id === OWNER_ID;
+  const admins = adminUsers.get(message.guild.id) || [];
+  const isAdmin = admins.includes(message.author.id);
+  const canUseCommands = isOwner || isAdmin;
+
+  // Admin management commands (owner only)
+  if (command === 'admadm') {
+    if (!isOwner) {
+      return message.reply('❌ Only the owner can use this command!');
+    }
+
+    const userId = args[0];
+    if (!userId) {
+      return message.reply('Usage: `!admadm USER_ID`');
+    }
+
+    const guildAdmins = adminUsers.get(message.guild.id) || [];
+    if (guildAdmins.includes(userId)) {
+      return message.reply('❌ This user is already an admin!');
+    }
+
+    guildAdmins.push(userId);
+    adminUsers.set(message.guild.id, guildAdmins);
+
+    const user = await client.users.fetch(userId).catch(() => null);
+    message.reply(`✅ Added **${user ? user.tag : userId}** as admin!`);
+  }
+
+  if (command === 'admrem') {
+    if (!isOwner) {
+      return message.reply('❌ Only the owner can use this command!');
+    }
+
+    const userId = args[0];
+    if (!userId) {
+      return message.reply('Usage: `!admrem USER_ID`');
+    }
+
+    const guildAdmins = adminUsers.get(message.guild.id) || [];
+    const index = guildAdmins.indexOf(userId);
+    
+    if (index === -1) {
+      return message.reply('❌ This user is not an admin!');
+    }
+
+    guildAdmins.splice(index, 1);
+    adminUsers.set(message.guild.id, guildAdmins);
+
+    const user = await client.users.fetch(userId).catch(() => null);
+    message.reply(`✅ Removed **${user ? user.tag : userId}** from admins!`);
+  }
+
+  if (command === 'admlist') {
+    if (!canUseCommands) {
+      return message.reply('❌ You don\'t have permission to use this command!');
+    }
+
+    const guildAdmins = adminUsers.get(message.guild.id) || [];
+    
+    if (guildAdmins.length === 0) {
+      return message.reply('📋 No admins added yet!');
+    }
+
+    let adminList = '📋 **Admin List:**\n\n';
+    for (const userId of guildAdmins) {
+      const user = await client.users.fetch(userId).catch(() => null);
+      adminList += `• ${user ? user.tag : userId} (${userId})\n`;
+    }
+
+    message.reply(adminList);
+  }
+
+  // Check permissions for all other commands
+  if (!canUseCommands && command !== 'admadm' && command !== 'admrem' && command !== 'admlist') {
+    return message.reply('❌ You don\'t have permission to use bot commands!');
+  }
 
   // !embed <message> - Creates a stylish embed
   if (command === 'embed') {
@@ -482,6 +563,52 @@ client.on('interactionCreate', async (interaction) => {
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
 
+      // Check if the person clicking is the ticket creator
+      if (ticketOwner && interaction.user.id !== ticketOwner.id) {
+        return interaction.reply({ 
+          content: '❌ Only the ticket creator can mark this as done!', 
+          ephemeral: true 
+        });
+      }
+
+      // Create confirmation buttons for admins
+      const confirmButton = new ButtonBuilder()
+        .setCustomId('confirm_done')
+        .setLabel('Confirm Done')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success);
+
+      const denyButton = new ButtonBuilder()
+        .setCustomId('deny_done')
+        .setLabel('Deny')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger);
+
+      const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
+
+      await interaction.reply({ 
+        content: `⏳ **${interaction.user}** marked this ticket as done!\n\n**Admins/Staff:** Please confirm if the service was completed.`,
+        components: [confirmRow]
+      });
+    }
+
+    if (interaction.customId === 'confirm_done') {
+      // Check if user is owner or admin
+      const isOwner = interaction.user.id === OWNER_ID;
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      const isAdmin = admins.includes(interaction.user.id);
+
+      if (!isOwner && !isAdmin) {
+        return interaction.reply({ 
+          content: '❌ Only admins can confirm this!', 
+          ephemeral: true 
+        });
+      }
+
+      // Get the ticket creator from channel name
+      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
+      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
       // Get service description from first message
       const messages = await interaction.channel.messages.fetch({ limit: 1 });
       const firstMessage = messages.first();
@@ -499,12 +626,12 @@ client.on('interactionCreate', async (interaction) => {
           const doneEmbed = new EmbedBuilder()
             .setColor('#00FF00')
             .setTitle('✅ Service Completed')
-            .setDescription(`**${ticketOwner ? ticketOwner.user.tag : ticketOwnerName}** Received His Service`)
+            .setDescription(`**${ticketOwner ? ticketOwner.user.tag : ticketOwnerName}** Received His Service\n\nConfirmed by: ${interaction.user}`)
             .addFields({ name: 'Service Ordered:', value: serviceDescription })
             .setTimestamp();
 
           const sentMessage = await doneChannel.send({ 
-            content: `${interaction.user}`, 
+            content: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, 
             embeds: [doneEmbed] 
           });
           
@@ -513,11 +640,33 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
 
-      await interaction.reply('✅ Service marked as done! Closing ticket in 5 seconds...');
+      await interaction.update({ 
+        content: `✅ **Service confirmed as completed by ${interaction.user}!**\n\nClosing ticket in 5 seconds...`,
+        components: []
+      });
 
       setTimeout(async () => {
         await interaction.channel.delete();
       }, 5000);
+    }
+
+    if (interaction.customId === 'deny_done') {
+      // Check if user is owner or admin
+      const isOwner = interaction.user.id === OWNER_ID;
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      const isAdmin = admins.includes(interaction.user.id);
+
+      if (!isOwner && !isAdmin) {
+        return interaction.reply({ 
+          content: '❌ Only admins can deny this!', 
+          ephemeral: true 
+        });
+      }
+
+      await interaction.update({ 
+        content: `❌ **Request denied by ${interaction.user}.**\n\nThe service is not yet complete. Please continue working on it.`,
+        components: []
+      });
     }
   }
 
@@ -575,7 +724,7 @@ client.on('interactionCreate', async (interaction) => {
           .setCustomId('close_ticket')
           .setLabel('Close Ticket')
           .setEmoji('🔒')
-        .setStyle(ButtonStyle.Danger);
+          .setStyle(ButtonStyle.Danger);
 
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
 
