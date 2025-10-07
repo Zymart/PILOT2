@@ -21,6 +21,7 @@ const orderChannels = new Map();
 const doneChannels = new Map();
 const adminUsers = new Map(); // Store admins per server
 const ticketChannels = new Map(); // Store created channels per ticket
+const webCategories = new Map(); // Store webhook channel category per server
 
 const OWNER_ID = '730629579533844512';
 
@@ -110,7 +111,16 @@ client.on('messageCreate', async (message) => {
 
   // Check permissions for all other commands
   if (!canUseCommands && command !== 'admadm' && command !== 'admrem' && command !== 'admlist') {
-    return message.reply('❌ You don\'t have permission to use bot commands!');
+    // Also check if user has Moderator or Administrator role
+    const hasModerator = message.member.roles.cache.some(r => 
+      r.name.toLowerCase().includes('moderator') || 
+      r.name.toLowerCase().includes('mod') ||
+      r.permissions.has(PermissionFlagsBits.Administrator)
+    );
+    
+    if (!hasModerator) {
+      return message.reply('❌ You don\'t have permission to use bot commands!');
+    }
   }
 
   // !embed <message> - Creates a stylish embed
@@ -382,6 +392,26 @@ client.on('messageCreate', async (message) => {
     message.reply(`✅ Ticket category set to: **${category.name}**`);
   }
 
+  // !conweb <category_id> - Set webhook channel category
+  if (command === 'conweb') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
+      return message.reply('❌ You need Administrator permission to use this command!');
+    }
+
+    const categoryId = args[0];
+    if (!categoryId) {
+      return message.reply('Please provide a category ID! Usage: `!conweb CATEGORY_ID`\nRight-click a category → Copy ID (enable Developer Mode first)');
+    }
+
+    const category = message.guild.channels.cache.get(categoryId);
+    if (!category || category.type !== ChannelType.GuildCategory) {
+      return message.reply('❌ Invalid category ID! Make sure it\'s a category, not a channel.');
+    }
+
+    webCategories.set(message.guild.id, categoryId);
+    message.reply(`✅ Webhook channel category set to: **${category.name}**`);
+  }
+
   // !conorders <channel_id> - Set orders log channel
   if (command === 'conorders') {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) {
@@ -491,9 +521,11 @@ client.on('messageCreate', async (message) => {
       }
 
       // Create the channel
+      const webCategoryId = webCategories.get(message.guild.id);
       const newChannel = await message.guild.channels.create({
         name: channelName,
         type: ChannelType.GuildText,
+        parent: webCategoryId || null,
         permissionOverwrites: permissionOverwrites,
       });
 
