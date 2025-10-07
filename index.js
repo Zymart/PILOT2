@@ -460,6 +460,15 @@ client.on('messageCreate', async (message) => {
       return message.reply('Please provide a channel name! Usage: `!createweb channel-name`');
     }
 
+    // Check if bot has required permissions
+    const botMember = message.guild.members.cache.get(client.user.id);
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) {
+      return message.reply('❌ I don\'t have **Manage Channels** permission!');
+    }
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) {
+      return message.reply('❌ I don\'t have **Manage Webhooks** permission!');
+    }
+
     try {
       let permissionOverwrites = [];
       let ticketOwner = null;
@@ -542,14 +551,15 @@ client.on('messageCreate', async (message) => {
       const webhook = await newChannel.createWebhook({
         name: `${channelName}-webhook`,
         avatar: client.user.displayAvatarURL(),
+        reason: `Created by ${message.author.tag}`,
       });
 
       // Send webhook URL (not embedded for easy copy)
       await message.channel.send(`✅ Channel created: <#${newChannel.id}>\n\n**Webhook URL:**\n${webhook.url}`);
 
     } catch (err) {
-      console.error(err);
-      message.reply('❌ Failed to create channel/webhook! Make sure I have proper permissions.');
+      console.error('CreateWeb Error:', err);
+      message.reply(`❌ Failed to create channel/webhook!\n**Error:** ${err.message}\n\nMake sure I have **Manage Channels** and **Manage Webhooks** permissions.`);
     }
   }
 
