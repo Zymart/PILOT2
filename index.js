@@ -20,6 +20,7 @@ const ticketCategories = new Map();
 const orderChannels = new Map();
 const doneChannels = new Map();
 const adminUsers = new Map(); // Store admins per server
+const ticketChannels = new Map(); // Store created channels per ticket
 
 const OWNER_ID = '730629579533844512';
 
@@ -421,6 +422,143 @@ client.on('messageCreate', async (message) => {
     message.reply(`✅ Done log channel set to: <#${channelId}>`);
   }
 
+  // !createweb <channel_name> - Creates a channel with webhook (Admin/Owner only, always private)
+  if (command === 'createweb') {
+    const channelName = args.join('-').toLowerCase();
+    
+    if (!channelName) {
+      return message.reply('Please provide a channel name! Usage: `!createweb channel-name`');
+    }
+
+    try {
+      let permissionOverwrites = [];
+      let ticketOwner = null;
+
+      // Check if command is used in a ticket to get ticket owner
+      if (message.channel.name.startsWith('ticket-')) {
+        const ticketOwnerName = message.channel.name.replace('ticket-', '');
+        ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+      }
+
+      // Always create as private channel
+      // Default permissions - hide from everyone
+      permissionOverwrites.push({
+        id: message.guild.id,
+        deny: [PermissionFlagsBits.ViewChannel],
+      });
+
+      // Add bot permissions
+      permissionOverwrites.push({
+        id: client.user.id,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks],
+      });
+
+      // Add ticket owner permissions if in ticket
+      if (ticketOwner) {
+        permissionOverwrites.push({
+          id: ticketOwner.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+        });
+      }
+
+      // Add owner permissions
+      permissionOverwrites.push({
+        id: OWNER_ID,
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+      });
+
+      // Add admin permissions
+      const admins = adminUsers.get(message.guild.id) || [];
+      for (const adminId of admins) {
+        permissionOverwrites.push({
+          id: adminId,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+        });
+      }
+
+      // Add staff role permissions if exists
+      const staffRole = message.guild.roles.cache.find(r => 
+        r.name.toLowerCase().includes('staff') || 
+        r.name.toLowerCase().includes('admin') ||
+        r.name.toLowerCase().includes('mod')
+      );
+
+      if (staffRole) {
+        permissionOverwrites.push({
+          id: staffRole.id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory],
+        });
+      }
+
+      // Create the channel
+      const newChannel = await message.guild.channels.create({
+        name: channelName,
+        type: ChannelType.GuildText,
+        permissionOverwrites: permissionOverwrites,
+      });
+
+      // If in a ticket, store the channel ID to delete later
+      if (message.channel.name.startsWith('ticket-')) {
+        const ticketId = message.channel.id;
+        if (!ticketChannels.has(ticketId)) {
+          ticketChannels.set(ticketId, []);
+        }
+        ticketChannels.get(ticketId).push(newChannel.id);
+      }
+
+      // Create webhook in the new channel
+      const webhook = await newChannel.createWebhook({
+        name: `${channelName}-webhook`,
+        avatar: client.user.displayAvatarURL(),
+      });
+
+      // Send webhook URL (not embedded for easy copy)
+      await message.channel.send(`✅ Channel created: <#${newChannel.id}>\n\n**Webhook URL:**\n${webhook.url}`);
+
+    } catch (err) {
+      console.error(err);
+      message.reply('❌ Failed to create channel/webhook! Make sure I have proper permissions.');
+    }
+  }
+
+  // !done - Ask ticket owner to mark as done (Admin/Owner only, must be in ticket)
+  if (command === 'done') {
+    if (!message.channel.name.startsWith('ticket-')) {
+      return message.reply('❌ This command can only be used in ticket channels!');
+    }
+
+    // Get the ticket creator from channel name
+    const ticketOwnerName = message.channel.name.replace('ticket-', '');
+    const ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
+    if (!ticketOwner) {
+      return message.reply('❌ Could not find ticket owner!');
+    }
+
+    // Create Done button for ticket owner
+    const doneButton = new ButtonBuilder()
+      .setCustomId('owner_done_confirmation')
+      .setLabel('Yes, Mark as Done')
+      .setEmoji('✅')
+      .setStyle(ButtonStyle.Success);
+
+    const cancelButton = new ButtonBuilder()
+      .setCustomId('owner_cancel_done')
+      .setLabel('Not Yet')
+      .setEmoji('❌')
+      .setStyle(ButtonStyle.Danger);
+
+    const row = new ActionRowBuilder().addComponents(doneButton, cancelButton);
+
+    await message.channel.send({ 
+      content: `${ticketOwner.user}\n\n**Do you want to mark this ticket as done?**\nClick the button below to confirm.`,
+      components: [row]
+    });
+
+    // Delete the command message
+    await message.delete().catch(() => {});
+  }
+
   // !ticket <message> - Create ticket panel with button
   if (command === 'ticket') {
     const fullText = args.join(' ');
@@ -547,6 +685,21 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply('🔒 Closing ticket in 5 seconds...');
 
       setTimeout(async () => {
+        // Delete any channels created with !createweb for this ticket
+        const ticketId = interaction.channel.id;
+        const createdChannels = ticketChannels.get(ticketId) || [];
+        
+        for (const channelId of createdChannels) {
+          const channelToDelete = interaction.guild.channels.cache.get(channelId);
+          if (channelToDelete) {
+            await channelToDelete.delete().catch(console.error);
+          }
+        }
+        
+        // Remove from map
+        ticketChannels.delete(ticketId);
+        
+        // Delete the ticket channel
         await interaction.channel.delete();
       }, 5000);
     }
@@ -589,6 +742,73 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.reply({ 
         content: `⏳ **${interaction.user}** marked this ticket as done!\n\n**Admins/Staff:** Please confirm if the service was completed.`,
         components: [confirmRow]
+      });
+    }
+
+    if (interaction.customId === 'owner_done_confirmation') {
+      if (!interaction.channel.name.startsWith('ticket-')) {
+        return interaction.reply({ 
+          content: '❌ This is not a ticket channel!', 
+          ephemeral: true 
+        });
+      }
+
+      // Get the ticket creator from channel name
+      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
+      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
+      // Check if the person clicking is the ticket creator
+      if (ticketOwner && interaction.user.id !== ticketOwner.id) {
+        return interaction.reply({ 
+          content: '❌ Only the ticket creator can click this!', 
+          ephemeral: true 
+        });
+      }
+
+      // Create confirmation buttons for admins
+      const confirmButton = new ButtonBuilder()
+        .setCustomId('confirm_done')
+        .setLabel('Confirm Done')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success);
+
+      const denyButton = new ButtonBuilder()
+        .setCustomId('deny_done')
+        .setLabel('Deny')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger);
+
+      const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
+
+      await interaction.update({ 
+        content: `⏳ **${interaction.user}** marked this ticket as done!\n\n**Admins/Staff:** Please confirm if the service was completed.`,
+        components: [confirmRow]
+      });
+    }
+
+    if (interaction.customId === 'owner_cancel_done') {
+      if (!interaction.channel.name.startsWith('ticket-')) {
+        return interaction.reply({ 
+          content: '❌ This is not a ticket channel!', 
+          ephemeral: true 
+        });
+      }
+
+      // Get the ticket creator from channel name
+      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
+      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
+      // Check if the person clicking is the ticket creator
+      if (ticketOwner && interaction.user.id !== ticketOwner.id) {
+        return interaction.reply({ 
+          content: '❌ Only the ticket creator can click this!', 
+          ephemeral: true 
+        });
+      }
+
+      await interaction.update({ 
+        content: `❌ **${interaction.user}** cancelled the done request.\n\nTicket will remain open.`,
+        components: []
       });
     }
 
@@ -646,6 +866,21 @@ client.on('interactionCreate', async (interaction) => {
       });
 
       setTimeout(async () => {
+        // Delete any channels created with !createweb for this ticket
+        const ticketId = interaction.channel.id;
+        const createdChannels = ticketChannels.get(ticketId) || [];
+        
+        for (const channelId of createdChannels) {
+          const channelToDelete = interaction.guild.channels.cache.get(channelId);
+          if (channelToDelete) {
+            await channelToDelete.delete().catch(console.error);
+          }
+        }
+        
+        // Remove from map
+        ticketChannels.delete(ticketId);
+        
+        // Delete the ticket channel
         await interaction.channel.delete();
       }, 5000);
     }
