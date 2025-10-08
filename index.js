@@ -548,14 +548,18 @@ client.on('messageCreate', async (message) => {
       }
 
       // Create webhook in the new channel
-      const webhook = await newChannel.createWebhook({
-        name: `${channelName}-webhook`,
-        avatar: client.user.displayAvatarURL(),
-        reason: `Created by ${message.author.tag}`,
-      });
+      try {
+        const webhook = await newChannel.createWebhook({
+          name: `${channelName}-webhook`,
+          reason: `Created by ${message.author.tag}`,
+        });
 
-      // Send webhook URL (not embedded for easy copy)
-      await message.channel.send(`✅ Channel created: <#${newChannel.id}>\n\n**Webhook URL:**\n${webhook.url}`);
+        // Send webhook URL (not embedded for easy copy)
+        await message.channel.send(`✅ Channel created: <#${newChannel.id}>\n\n**Webhook URL:**\n${webhook.url}`);
+      } catch (webhookError) {
+        console.error('Webhook Creation Error:', webhookError);
+        await message.channel.send(`✅ Channel created: <#${newChannel.id}>\n\n❌ **Webhook creation failed:**\n${webhookError.message}\n\nThe channel was created but webhook failed. Please check bot permissions in the new channel.`);
+      }
 
     } catch (err) {
       console.error('CreateWeb Error:', err);
