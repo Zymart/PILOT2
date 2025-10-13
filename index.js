@@ -77,7 +77,11 @@ client.on('messageCreate', async (message) => {
 
     const guildAdmins = adminUsers.get(message.guild.id) || [];
     const index = guildAdmins.indexOf(userId);
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
     if (index === -1) {
       return message.reply('❌ This user is not an admin!');
     }
@@ -95,7 +99,11 @@ client.on('messageCreate', async (message) => {
     }
 
     const guildAdmins = adminUsers.get(message.guild.id) || [];
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
     if (guildAdmins.length === 0) {
       return message.reply('📋 No admins added yet!');
     }
@@ -117,7 +125,11 @@ client.on('messageCreate', async (message) => {
       r.name.toLowerCase().includes('mod') ||
       r.permissions.has(PermissionFlagsBits.Administrator)
     );
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
     if (!hasModerator) {
       return message.reply('❌ You don\'t have permission to use bot commands!');
     }
@@ -228,7 +240,11 @@ client.on('messageCreate', async (message) => {
   if (command === 'colorembed') {
     const color = args[0];
     const text = args.slice(1).join(' ');
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
     if (!color || !text) {
       return message.reply('Usage: `!colorembed #FF0000 Your message here`');
     }
@@ -322,7 +338,11 @@ client.on('messageCreate', async (message) => {
     const fancyFont = (str) => {
       const normal = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
       const fancy = '𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵';
+<<<<<<< HEAD
 
+=======
+      
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
       return str.split('').map(char => {
         const index = normal.indexOf(char);
         return index !== -1 ? fancy[index] : char;
@@ -336,7 +356,11 @@ client.on('messageCreate', async (message) => {
     const lines = text.split('\n');
     const processedLines = lines.map(line => {
       const lowerLine = line.toLowerCase();
+<<<<<<< HEAD
 
+=======
+      
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
       // Check what the line is about and add appropriate emoji at the start
       if (lowerLine.includes('service') || lowerLine.includes('offer')) return `💸 ${line}`;
       if (lowerLine.includes('pilot')) return `✈️ ${line}`;
@@ -351,7 +375,11 @@ client.on('messageCreate', async (message) => {
       if (lowerLine.includes('new')) return `🆕 ${line}`;
       if (lowerLine.includes('sale') || lowerLine.includes('hot')) return `🔥 ${line}`;
       if (lowerLine.includes('discount')) return `💥 ${line}`;
+<<<<<<< HEAD
 
+=======
+      
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
       return `✨ ${line}`; // Default emoji for other lines
     });
 
@@ -455,7 +483,11 @@ client.on('messageCreate', async (message) => {
   // !createweb <channel_name> - Creates a channel with webhook (Admin/Owner only, always private)
   if (command === 'createweb') {
     const channelName = args.join('-').toLowerCase();
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
     if (!channelName) {
       return message.reply('Please provide a channel name! Usage: `!createweb channel-name`');
     }
@@ -674,7 +706,11 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     if (interaction.customId === 'create_ticket') {
       const categoryId = ticketCategories.get(interaction.guild.id);
+<<<<<<< HEAD
 
+=======
+      
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
       if (!categoryId) {
         return interaction.reply({ 
           content: '❌ Ticket category not set! Ask an admin to use `!concategory <category_id>`', 
@@ -734,17 +770,28 @@ client.on('interactionCreate', async (interaction) => {
         // Delete any channels created with !createweb for this ticket
         const ticketId = interaction.channel.id;
         const createdChannels = ticketChannels.get(ticketId) || [];
+<<<<<<< HEAD
 
+=======
+        
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
         for (const channelId of createdChannels) {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) {
             await channelToDelete.delete().catch(console.error);
           }
         }
+<<<<<<< HEAD
 
         // Remove from map
         ticketChannels.delete(ticketId);
 
+=======
+        
+        // Remove from map
+        ticketChannels.delete(ticketId);
+        
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
         // Delete the ticket channel
         await interaction.channel.delete();
       }, 5000);
@@ -879,7 +926,11 @@ client.on('interactionCreate', async (interaction) => {
       const messages = await interaction.channel.messages.fetch({ limit: 1 });
       const firstMessage = messages.first();
       let serviceDescription = 'N/A';
+<<<<<<< HEAD
 
+=======
+      
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
       if (firstMessage && firstMessage.content.includes('Service Request:')) {
         serviceDescription = firstMessage.content.split('Service Request:')[1].trim();
       }
@@ -900,7 +951,11 @@ client.on('interactionCreate', async (interaction) => {
             content: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, 
             embeds: [doneEmbed] 
           });
+<<<<<<< HEAD
 
+=======
+          
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
           // Add checkmark reaction as proof
           await sentMessage.react('✅');
         }
@@ -915,17 +970,28 @@ client.on('interactionCreate', async (interaction) => {
         // Delete any channels created with !createweb for this ticket
         const ticketId = interaction.channel.id;
         const createdChannels = ticketChannels.get(ticketId) || [];
+<<<<<<< HEAD
 
+=======
+        
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
         for (const channelId of createdChannels) {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) {
             await channelToDelete.delete().catch(console.error);
           }
         }
+<<<<<<< HEAD
 
         // Remove from map
         ticketChannels.delete(ticketId);
 
+=======
+        
+        // Remove from map
+        ticketChannels.delete(ticketId);
+        
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
         // Delete the ticket channel
         await interaction.channel.delete();
       }, 5000);
@@ -956,7 +1022,11 @@ client.on('interactionCreate', async (interaction) => {
     if (interaction.customId === 'ticket_modal') {
       const serviceDescription = interaction.fields.getTextInputValue('service_type');
       const categoryId = ticketCategories.get(interaction.guild.id);
+<<<<<<< HEAD
 
+=======
+      
+>>>>>>> e7077370a406bfebc55b5b8f8b68ffdbcb9b93cf
       try {
         // Create ticket channel
         const ticketChannel = await interaction.guild.channels.create({
