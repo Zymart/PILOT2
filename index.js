@@ -22,7 +22,7 @@ const doneChannels = new Map();
 const adminUsers = new Map();
 const ticketChannels = new Map();
 const webCategories = new Map();
-const shopListings = new Map(); // Store shop listings per guild: { userId: [items] }
+const shopListings = new Map();
 
 const OWNER_ID = '730629579533844512';
 
@@ -734,4 +734,216 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
-      const ticketOwnerName = interaction.channel.name.replace('ticket-
+      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
+      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
+      if (!ticketOwner) {
+        return interaction.reply({ 
+          content: '❌ Could not find ticket owner!', 
+          ephemeral: true 
+        });
+      }
+
+      const doneButton = new ButtonBuilder()
+        .setCustomId('owner_done_confirmation')
+        .setLabel('Yes, Mark as Done')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success);
+
+      const cancelButton = new ButtonBuilder()
+        .setCustomId('owner_cancel_done')
+        .setLabel('Not Yet')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger);
+
+      const row = new ActionRowBuilder().addComponents(doneButton, cancelButton);
+
+      await interaction.reply({ 
+        content: `${ticketOwner.user}\n\n**Do you want to mark this ticket as done?**\nClick the button below to confirm.`,
+        components: [row]
+      });
+    }
+
+    if (interaction.customId === 'owner_done_confirmation') {
+      const doneChannelId = doneChannels.get(interaction.guild.id);
+
+      if (doneChannelId) {
+        const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
+        if (doneChannel) {
+          const logEmbed = new EmbedBuilder()
+            .setColor('#00FF00')
+            .setTitle('✅ Ticket Marked as Done')
+            .addFields(
+              { name: 'Ticket', value: interaction.channel.name, inline: true },
+              { name: 'Closed By', value: `${interaction.user.tag}`, inline: true },
+              { name: 'Time', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
+            )
+            .setTimestamp();
+
+          await doneChannel.send({ embeds: [logEmbed] });
+        }
+      }
+
+      await interaction.update({ 
+        content: '✅ Ticket marked as done! Closing in 5 seconds...', 
+        components: [] 
+      });
+
+      setTimeout(async () => {
+        const ticketId = interaction.channel.id;
+        const createdChannels = ticketChannels.get(ticketId) || [];
+
+        for (const channelId of createdChannels) {
+          const channelToDelete = interaction.guild.channels.cache.get(channelId);
+          if (channelToDelete) {
+            await channelToDelete.delete().catch(console.error);
+          }
+        }
+
+        ticketChannels.delete(ticketId);
+        await interaction.channel.delete();
+      }, 5000);
+    }
+
+    if (interaction.customId === 'owner_cancel_done') {
+      await interaction.update({ 
+        content: '❌ Cancelled. Ticket remains open.', 
+        components: [] 
+      });
+    }
+  }
+
+  // Modal submission
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId === 'ticket_modal') {
+      const serviceType = interaction.fields.getTextInputValue('service_type');
+      const categoryId = ticketCategories.get(interaction.guild.id);
+
+      try {
+        const ticketChannel = await interaction.guild.channels.create({
+          name: `ticket-${interaction.user.username.toLowerCase()}`,
+          type: ChannelType.GuildText,
+          parent: categoryId,
+          permissionOverwrites: [
+            {
+              id: interaction.guild.id,
+              deny: [PermissionFlagsBits.ViewChannel],
+            },
+            {
+              id: interaction.user.id,
+              allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+              ],
+            },
+            {
+              id: client.user.id,
+              allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+              ],
+            },
+            {
+              id: OWNER_ID,
+              allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+              ],
+            },
+          ],
+        });
+
+        const admins = adminUsers.get(interaction.guild.id) || [];
+        for (const adminId of admins) {
+          await ticketChannel.permissionOverwrites.create(adminId, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+          });
+        }
+
+        const staffRole = interaction.guild.roles.cache.find(r => 
+          r.name.toLowerCase().includes('staff') || 
+          r.name.toLowerCase().includes('admin') ||
+          r.name.toLowerCase().includes('mod')
+        );
+
+        if (staffRole) {
+          await ticketChannel.permissionOverwrites.create(staffRole, {
+            ViewChannel: true,
+            SendMessages: true,
+            ReadMessageHistory: true,
+          });
+        }
+
+        const embed = new EmbedBuilder()
+          .setColor('#00BFFF')
+          .setTitle('🎫 New Support Ticket')
+          .setDescription(`**Ticket Owner:** ${interaction.user}\n**Service Requested:**\n${serviceType}`)
+          .addFields(
+            { name: 'Status', value: '🟢 Open', inline: true },
+            { name: 'Created', value: `<t:${Math.floor(Date.now() / 1000)}:R>`, inline: true }
+          )
+          .setTimestamp()
+          .setFooter({ text: 'Support Team will assist you shortly' });
+
+        const closeButton = new ButtonBuilder()
+          .setCustomId('close_ticket')
+          .setLabel('Close Ticket')
+          .setEmoji('🔒')
+          .setStyle(ButtonStyle.Danger);
+
+        const doneButton = new ButtonBuilder()
+          .setCustomId('done_ticket')
+          .setLabel('Mark as Done')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success);
+
+        const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
+
+        await ticketChannel.send({
+          content: `${interaction.user} | <@&${staffRole?.id || ''}>`,
+          embeds: [embed],
+          components: [row],
+        });
+
+        const orderChannelId = orderChannels.get(interaction.guild.id);
+        if (orderChannelId) {
+          const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
+          if (orderChannel) {
+            const orderEmbed = new EmbedBuilder()
+              .setColor('#FFA500')
+              .setTitle('📋 New Order/Ticket Created')
+              .addFields(
+                { name: 'User', value: `${interaction.user.tag} (${interaction.user.id})`, inline: true },
+                { name: 'Channel', value: `<#${ticketChannel.id}>`, inline: true },
+                { name: 'Service', value: serviceType, inline: false },
+                { name: 'Created At', value: `<t:${Math.floor(Date.now() / 1000)}:F>`, inline: false }
+              )
+              .setTimestamp();
+
+            await orderChannel.send({ embeds: [orderEmbed] });
+          }
+        }
+
+        await interaction.reply({
+          content: `✅ Ticket created! Check <#${ticketChannel.id}>`,
+          ephemeral: true,
+        });
+
+      } catch (err) {
+        console.error('Ticket Creation Error:', err);
+        await interaction.reply({
+          content: '❌ Failed to create ticket! Please contact an administrator.',
+          ephemeral: true,
+        });
+      }
+    }
+  }
+});
+
+// Login
+client.login(process.env.TOKEN);
