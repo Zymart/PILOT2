@@ -617,6 +617,42 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // !shop command
+  if (command === 'shop') {
+    const shopEmbed = new EmbedBuilder()
+      .setColor('#FFD700')
+      .setTitle('🛒 Marketplace')
+      .setDescription('Browse items or manage your shop!')
+      .addFields(
+        { name: '🔍 Shop', value: 'Browse and search for items', inline: true },
+        { name: '⚙️ Manage Shop', value: 'Add, edit, or remove your items', inline: true }
+      )
+      .setTimestamp()
+      .setFooter({ text: 'Click a button below to get started' });
+
+    const shopButton = new ButtonBuilder()
+      .setCustomId('browse_shop')
+      .setLabel('Shop')
+      .setEmoji('🔍')
+      .setStyle(ButtonStyle.Primary);
+
+    const manageButton = new ButtonBuilder()
+      .setCustomId('manage_shop')
+      .setLabel('Manage Shop')
+      .setEmoji('⚙️')
+      .setStyle(ButtonStyle.Success);
+
+    const row = new ActionRowBuilder().addComponents(shopButton, manageButton);
+
+    try {
+      await message.delete();
+      await message.channel.send({ embeds: [shopEmbed], components: [row] });
+    } catch (err) {
+      console.error(err);
+      message.reply('❌ Failed to create shop panel!');
+    }
+  }
+
   // !help command
   if (command === 'help') {
     const helpEmbed = new EmbedBuilder()
@@ -628,6 +664,7 @@ client.on('messageCreate', async (message) => {
         { name: '!auto <message>', value: '✨ Auto-adds emojis and fancy fonts', inline: false },
         { name: '!fancy <message>', value: 'Creates a fancy gradient embed (first line = title)', inline: false },
         { name: '!ticket <message>', value: '🎫 Creates a ticket panel with button', inline: false },
+        { name: '!shop', value: '🛒 Opens the marketplace panel', inline: false },
         { name: '!createweb <n>', value: '🔗 Creates private channel with webhook', inline: false },
         { name: '!done', value: '✅ Mark ticket as done (Admin/Owner, ticket only)', inline: false },
         { name: '!concategory <id>', value: '⚙️ Set ticket category (Admin only)', inline: false },
