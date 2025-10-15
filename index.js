@@ -734,4 +734,4 @@ client.on('interactionCreate', async (interaction) => {
         });
       }
 
-      const ticketOwnerName = interaction.channel.name.replace('ticket-', '')
+      const ticketOwnerName = interaction.channel.name.replace('ticket-
