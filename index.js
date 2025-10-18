@@ -4,6 +4,7 @@ if (!global.ReadableStream) {
 }
 
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder } = require('discord.js');
+const { MongoClient } = require('mongodb');
 
 const client = new Client({
   intents: [
@@ -14,20 +15,153 @@ const client = new Client({
 });
 
 const PREFIX = '!';
-
-const ticketCategories = new Map();
-const orderChannels = new Map();
-const doneChannels = new Map();
-const adminUsers = new Map();
-const ticketChannels = new Map();
-const webCategories = new Map();
-const shopListings = new Map();
-
 const OWNER_ID = '730629579533844512';
 
-client.once('ready', () => {
+// MongoDB connection
+const MONGODB_URI = process.env.MONGODB_URI || 'your_mongodb_connection_string';
+let db;
+let mongoClient;
+
+async function connectDB() {
+  try {
+    mongoClient = new MongoClient(MONGODB_URI);
+    await mongoClient.connect();
+    db = mongoClient.db('discord_bot');
+    console.log('✅ Connected to MongoDB');
+  } catch (err) {
+    console.error('❌ MongoDB connection failed:', err);
+  }
+}
+
+// Load data from MongoDB
+async function loadData() {
+  try {
+    const collection = db.collection('bot_data');
+    const data = await collection.findOne({ _id: 'main_data' });
+    if (data) {
+      return {
+        ticketCategories: new Map(Object.entries(data.ticketCategories || {})),
+        orderChannels: new Map(Object.entries(data.orderChannels || {})),
+        doneChannels: new Map(Object.entries(data.doneChannels || {})),
+        adminUsers: new Map(Object.entries(data.adminUsers || {}).map(([k, v]) => [k, v || []])),
+        ticketChannels: new Map(Object.entries(data.ticketChannels || {}).map(([k, v]) => [k, v || []])),
+        webCategories: new Map(Object.entries(data.webCategories || {})),
+        shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
+        ticketOwners: new Map(Object.entries(data.ticketOwners || {}))
+      };
+    }
+  } catch (err) {
+    console.error('Error loading data:', err);
+  }
+  return {
+    ticketCategories: new Map(),
+    orderChannels: new Map(),
+    doneChannels: new Map(),
+    adminUsers: new Map(),
+    ticketChannels: new Map(),
+    webCategories: new Map(),
+    shopListings: new Map(),
+    ticketOwners: new Map()
+  };
+}
+
+// Save data to MongoDB
+async function saveData() {
+  try {
+    const collection = db.collection('bot_data');
+    const data = {
+      _id: 'main_data',
+      ticketCategories: Object.fromEntries(ticketCategories),
+      orderChannels: Object.fromEntries(orderChannels),
+      doneChannels: Object.fromEntries(doneChannels),
+      adminUsers: Object.fromEntries(adminUsers),
+      ticketChannels: Object.fromEntries(ticketChannels),
+      webCategories: Object.fromEntries(webCategories),
+      shopListings: Object.fromEntries(
+        Array.from(shopListings.entries()).map(([guildId, userMap]) => [
+          guildId,
+          Object.fromEntries(userMap)
+        ])
+      ),
+      ticketOwners: Object.fromEntries(ticketOwners)
+    };
+    await collection.replaceOne({ _id: 'main_data' }, data, { upsert: true });
+  } catch (err) {
+    console.error('Error saving data:', err);
+  }
+}
+
+let ticketCategories = new Map();
+let orderChannels = new Map();
+let doneChannels = new Map();
+let adminUsers = new Map();
+let ticketChannels = new Map();
+let webCategories = new Map();
+let shopListings = new Map();
+let ticketOwners = new Map();
+
+client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
+  await connectDB();
+  const loadedData = await loadData();
+  ticketCategories = loadedData.ticketCategories;
+  orderChannels = loadedData.orderChannels;
+  doneChannels = loadedData.doneChannels;
+  adminUsers = loadedData.adminUsers;
+  ticketChannels = loadedData.ticketChannels;
+  webCategories = loadedData.webCategories;
+  shopListings = loadedData.shopListings;
+  ticketOwners = loadedData.ticketOwners;
+  console.log('✅ Data loaded from MongoDB');
+
+  // Cleanup orphaned data every hour
+  setInterval(async () => {
+    await cleanupOrphanedData();
+  }, 3600000); // 1 hour
 });
+
+// Cleanup function to remove data for deleted channels
+async function cleanupOrphanedData() {
+  console.log('🧹 Running cleanup...');
+  let cleaned = false;
+
+  for (const [ticketId, channels] of ticketChannels.entries()) {
+    const guild = client.guilds.cache.find(g => g.channels.cache.has(ticketId));
+    if (!guild) {
+      ticketChannels.delete(ticketId);
+      ticketOwners.delete(ticketId);
+      cleaned = true;
+      console.log(`🗑️ Removed orphaned ticket ${ticketId}`);
+    }
+  }
+
+  // Clean up shop items from users who left all servers
+  for (const [guildId, shops] of shopListings.entries()) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) {
+      shopListings.delete(guildId);
+      cleaned = true;
+      console.log(`🗑️ Removed shop data for deleted guild ${guildId}`);
+      continue;
+    }
+
+    for (const [userId, items] of shops.entries()) {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (!member) {
+        shops.delete(userId);
+        cleaned = true;
+        console.log(`🗑️ Removed shop items for user ${userId} who left`);
+      }
+    }
+  }
+
+  if (cleaned) {
+    await saveData();
+    console.log('✅ Cleanup complete and saved to MongoDB');
+  } else {
+    console.log('✅ No cleanup needed');
+  }
+}
 
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
@@ -49,6 +183,7 @@ client.on('messageCreate', async (message) => {
     if (guildAdmins.includes(userId)) return message.reply('❌ This user is already an admin!');
     guildAdmins.push(userId);
     adminUsers.set(message.guild.id, guildAdmins);
+    saveData();
     const user = await client.users.fetch(userId).catch(() => null);
     message.reply(`✅ Added **${user ? user.tag : userId}** as admin!`);
   }
@@ -62,6 +197,7 @@ client.on('messageCreate', async (message) => {
     if (index === -1) return message.reply('❌ This user is not an admin!');
     guildAdmins.splice(index, 1);
     adminUsers.set(message.guild.id, guildAdmins);
+    saveData();
     const user = await client.users.fetch(userId).catch(() => null);
     message.reply(`✅ Removed **${user ? user.tag : userId}** from admins!`);
   }
@@ -268,6 +404,7 @@ client.on('messageCreate', async (message) => {
     const category = message.guild.channels.cache.get(categoryId);
     if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
     ticketCategories.set(message.guild.id, categoryId);
+    saveData();
     message.reply(`✅ Ticket category set to: **${category.name}**`);
   }
 
@@ -278,6 +415,7 @@ client.on('messageCreate', async (message) => {
     const category = message.guild.channels.cache.get(categoryId);
     if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
     webCategories.set(message.guild.id, categoryId);
+    saveData();
     message.reply(`✅ Webhook channel category set to: **${category.name}**`);
   }
 
@@ -288,6 +426,7 @@ client.on('messageCreate', async (message) => {
     const channel = message.guild.channels.cache.get(channelId);
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
     orderChannels.set(message.guild.id, channelId);
+    saveData();
     message.reply(`✅ Orders log channel set to: <#${channelId}>`);
   }
 
@@ -298,6 +437,7 @@ client.on('messageCreate', async (message) => {
     const channel = message.guild.channels.cache.get(channelId);
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
     doneChannels.set(message.guild.id, channelId);
+    saveData();
     message.reply(`✅ Done log channel set to: <#${channelId}>`);
   }
 
@@ -330,6 +470,7 @@ client.on('messageCreate', async (message) => {
         const ticketId = message.channel.id;
         if (!ticketChannels.has(ticketId)) ticketChannels.set(ticketId, []);
         ticketChannels.get(ticketId).push(newChannel.id);
+        saveData();
       }
       try {
         const webhook = await newChannel.createWebhook({ name: `${channelName}-webhook`, reason: `Created by ${message.author.tag}` });
@@ -419,7 +560,7 @@ client.on('messageCreate', async (message) => {
 });
 
 client.on('interactionCreate', async (interaction) => {
-if (interaction.isButton()) {
+  if (interaction.isButton()) {
     if (interaction.customId === 'shop_browse') {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       if (guildShops.size === 0) return interaction.reply({ content: '❌ No items yet!', ephemeral: true });
@@ -476,7 +617,11 @@ if (interaction.isButton()) {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) await channelToDelete.delete().catch(console.error);
         }
+        // Remove ticket data from MongoDB
         ticketChannels.delete(ticketId);
+        ticketOwners.delete(ticketId);
+        await saveData();
+        console.log(`🗑️ Cleaned up ticket ${ticketId} from database`);
         await interaction.channel.delete().catch(console.error);
       }, 5000);
     }
@@ -550,7 +695,11 @@ if (interaction.isButton()) {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) await channelToDelete.delete().catch(console.error);
         }
+        // Remove ticket data from MongoDB
         ticketChannels.delete(ticketId);
+        ticketOwners.delete(ticketId);
+        await saveData();
+        console.log(`🗑️ Cleaned up completed ticket ${ticketId} from database`);
         await interaction.channel.delete().catch(console.error);
       }, 5000);
     }
@@ -587,6 +736,11 @@ if (interaction.isButton()) {
         const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
         await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket Created by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
+
+        // Save ticket owner
+        ticketOwners.set(ticketChannel.id, interaction.user.id);
+        saveData();
+
         const orderChannelId = orderChannels.get(interaction.guild.id);
         if (orderChannelId) {
           const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
@@ -617,6 +771,7 @@ if (interaction.isButton()) {
         userItems.push({ id: itemId, name: itemName, price: price, seller: interaction.user.tag });
         guildShops.set(interaction.user.id, userItems);
         shopListings.set(interaction.guild.id, guildShops);
+        saveData();
         interaction.reply({ content: `✅ Added **${itemName}** for **${price}** to your shop!`, ephemeral: true });
       } else if (action === 'remove') {
         const itemIndex = userItems.findIndex(item => item.name.toLowerCase() === itemName.toLowerCase());
@@ -624,6 +779,8 @@ if (interaction.isButton()) {
         userItems.splice(itemIndex, 1);
         guildShops.set(interaction.user.id, userItems);
         shopListings.set(interaction.guild.id, guildShops);
+        await saveData();
+        console.log(`🗑️ Removed item ${itemName} from shop in database`);
         interaction.reply({ content: `✅ Removed **${itemName}** from your shop!`, ephemeral: true });
       } else {
         interaction.reply({ content: '❌ Invalid action! Use "add" or "remove".', ephemeral: true });
@@ -638,13 +795,58 @@ if (interaction.isButton()) {
       const sellerItems = guildShops.get(sellerId) || [];
       const item = sellerItems.find(i => i.id === itemId);
       if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
+
       const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
-      const itemEmbed = new EmbedBuilder()
-        .setColor('#FFD700')
-        .setTitle(`🛍️ ${item.name}`)
-        .addFields({ name: 'Price:', value: item.price }, { name: 'Seller:', value: seller ? seller.tag : 'Unknown' })
-        .setTimestamp();
-      interaction.reply({ embeds: [itemEmbed], content: `✅ Contact <@${sellerId}> to purchase this item!`, ephemeral: true });
+      const buyer = interaction.user;
+
+      // Create ticket between buyer and seller
+      const categoryId = ticketCategories.get(interaction.guild.id);
+      if (!categoryId) return interaction.reply({ content: '❌ Ticket category not set! Ask admin to use !concategory', ephemeral: true });
+
+      try {
+        const ticketChannel = await interaction.guild.channels.create({
+          name: `shop-${buyer.username}-${seller ? seller.username : 'seller'}`,
+          type: ChannelType.GuildText,
+          parent: categoryId,
+          permissionOverwrites: [
+            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            { id: buyer.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+            { id: sellerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+          ],
+        });
+
+        // Add staff role permissions
+        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
+        if (staffRole) {
+          await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        }
+
+        // Add owner permissions
+        await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+
+        // Add admin permissions
+        const admins = adminUsers.get(interaction.guild.id) || [];
+        for (const adminId of admins) {
+          await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        }
+
+        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
+        const row = new ActionRowBuilder().addComponents(closeButton);
+
+        const itemEmbed = new EmbedBuilder()
+          .setColor('#FFD700')
+          .setTitle('🛍️ Shop Transaction')
+          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n**Item:** ${item.name}\n**Price:** ${item.price}`)
+          .setTimestamp();
+
+        await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
+
+        interaction.reply({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, ephemeral: true });
+      } catch (err) {
+        console.error('Shop Ticket Error:', err);
+        interaction.reply({ content: '❌ Failed to create shop ticket!', ephemeral: true });
+      }
     }
   }
 });
