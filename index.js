@@ -4,7 +4,7 @@ if (!global.ReadableStream) {
 }
 
 const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder } = require('discord.js');
-const { MongoClient } = require('mongodb');
+const https = require('https');
 
 const client = new Client({
   intents: [
@@ -17,42 +17,128 @@ const client = new Client({
 const PREFIX = '!';
 const OWNER_ID = '730629579533844512';
 
-// MongoDB connection
-const MONGODB_URI = process.env.MONGODB_URI || 'your_mongodb_connection_string';
-let db;
-let mongoClient;
+// JSONBin.io cloud storage (free, no database setup needed)
+const JSONBIN_API_KEY = process.env.JSONBIN_API_KEY || '';
+const JSONBIN_BIN_ID = process.env.JSONBIN_BIN_ID || '';
 
-async function connectDB() {
-  try {
-    mongoClient = new MongoClient(MONGODB_URI);
-    await mongoClient.connect();
-    db = mongoClient.db('discord_bot');
-    console.log('✅ Connected to MongoDB');
-  } catch (err) {
-    console.error('❌ MongoDB connection failed:', err);
+// Load data from JSONBin cloud storage
+async function loadData() {
+  if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) {
+    console.log('⚠️ JSONBin not configured, using empty data');
+    return getEmptyData();
   }
+
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.jsonbin.io',
+      path: `/v3/b/${JSONBIN_BIN_ID}/latest`,
+      method: 'GET',
+      headers: {
+        'X-Master-Key': JSONBIN_API_KEY
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const record = json.record || {};
+          resolve(parseData(record));
+        } catch (err) {
+          console.error('Error parsing data:', err.message);
+          resolve(getEmptyData());
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Error loading data:', err.message);
+      resolve(getEmptyData());
+    });
+
+    req.end();
+  });
 }
 
-// Load data from MongoDB
-async function loadData() {
-  try {
-    const collection = db.collection('bot_data');
-    const data = await collection.findOne({ _id: 'main_data' });
-    if (data) {
-      return {
-        ticketCategories: new Map(Object.entries(data.ticketCategories || {})),
-        orderChannels: new Map(Object.entries(data.orderChannels || {})),
-        doneChannels: new Map(Object.entries(data.doneChannels || {})),
-        adminUsers: new Map(Object.entries(data.adminUsers || {}).map(([k, v]) => [k, v || []])),
-        ticketChannels: new Map(Object.entries(data.ticketChannels || {}).map(([k, v]) => [k, v || []])),
-        webCategories: new Map(Object.entries(data.webCategories || {})),
-        shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
-        ticketOwners: new Map(Object.entries(data.ticketOwners || {}))
-      };
-    }
-  } catch (err) {
-    console.error('Error loading data:', err);
+// Save data to JSONBin cloud storage
+async function saveData() {
+  if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) {
+    console.log('⚠️ JSONBin not configured, data not saved to cloud');
+    return;
   }
+
+  const data = {
+    ticketCategories: Object.fromEntries(ticketCategories),
+    orderChannels: Object.fromEntries(orderChannels),
+    doneChannels: Object.fromEntries(doneChannels),
+    adminUsers: Object.fromEntries(adminUsers),
+    ticketChannels: Object.fromEntries(ticketChannels),
+    webCategories: Object.fromEntries(webCategories),
+    shopListings: Object.fromEntries(
+      Array.from(shopListings.entries()).map(([guildId, userMap]) => [
+        guildId,
+        Object.fromEntries(userMap)
+      ])
+    ),
+    ticketOwners: Object.fromEntries(ticketOwners),
+    shopCategories: Object.fromEntries(shopCategories),
+    transcriptChannels: Object.fromEntries(transcriptChannels)
+  };
+
+  return new Promise((resolve) => {
+    const jsonData = JSON.stringify(data);
+    const options = {
+      hostname: 'api.jsonbin.io',
+      path: `/v3/b/${JSONBIN_BIN_ID}`,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': JSONBIN_API_KEY,
+        'Content-Length': Buffer.byteLength(jsonData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => responseData += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          console.log('💾 Data saved to cloud');
+        } else {
+          console.error('❌ Failed to save data:', res.statusCode);
+        }
+        resolve();
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Error saving data:', err.message);
+      resolve();
+    });
+
+    req.write(jsonData);
+    req.end();
+  });
+}
+
+function parseData(data) {
+  return {
+    ticketCategories: new Map(Object.entries(data.ticketCategories || {})),
+    orderChannels: new Map(Object.entries(data.orderChannels || {})),
+    doneChannels: new Map(Object.entries(data.doneChannels || {})),
+    adminUsers: new Map(Object.entries(data.adminUsers || {}).map(([k, v]) => [k, v || []])),
+    ticketChannels: new Map(Object.entries(data.ticketChannels || {}).map(([k, v]) => [k, v || []])),
+    webCategories: new Map(Object.entries(data.webCategories || {})),
+    shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
+    ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
+    shopCategories: new Map(Object.entries(data.shopCategories || {})),
+    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {}))
+  };
+}
+
+function getEmptyData() {
   return {
     ticketCategories: new Map(),
     orderChannels: new Map(),
@@ -61,34 +147,10 @@ async function loadData() {
     ticketChannels: new Map(),
     webCategories: new Map(),
     shopListings: new Map(),
-    ticketOwners: new Map()
+    ticketOwners: new Map(),
+    shopCategories: new Map(),
+    transcriptChannels: new Map()
   };
-}
-
-// Save data to MongoDB
-async function saveData() {
-  try {
-    const collection = db.collection('bot_data');
-    const data = {
-      _id: 'main_data',
-      ticketCategories: Object.fromEntries(ticketCategories),
-      orderChannels: Object.fromEntries(orderChannels),
-      doneChannels: Object.fromEntries(doneChannels),
-      adminUsers: Object.fromEntries(adminUsers),
-      ticketChannels: Object.fromEntries(ticketChannels),
-      webCategories: Object.fromEntries(webCategories),
-      shopListings: Object.fromEntries(
-        Array.from(shopListings.entries()).map(([guildId, userMap]) => [
-          guildId,
-          Object.fromEntries(userMap)
-        ])
-      ),
-      ticketOwners: Object.fromEntries(ticketOwners)
-    };
-    await collection.replaceOne({ _id: 'main_data' }, data, { upsert: true });
-  } catch (err) {
-    console.error('Error saving data:', err);
-  }
 }
 
 let ticketCategories = new Map();
@@ -99,10 +161,11 @@ let ticketChannels = new Map();
 let webCategories = new Map();
 let shopListings = new Map();
 let ticketOwners = new Map();
+let shopCategories = new Map();
+let transcriptChannels = new Map();
 
 client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
-  await connectDB();
   const loadedData = await loadData();
   ticketCategories = loadedData.ticketCategories;
   orderChannels = loadedData.orderChannels;
@@ -112,19 +175,21 @@ client.once('ready', async () => {
   webCategories = loadedData.webCategories;
   shopListings = loadedData.shopListings;
   ticketOwners = loadedData.ticketOwners;
-  console.log('✅ Data loaded from MongoDB');
-
+  shopCategories = loadedData.shopCategories;
+  transcriptChannels = loadedData.transcriptChannels;
+  console.log('✅ Data loaded from cloud storage');
+  
   // Cleanup orphaned data every hour
   setInterval(async () => {
     await cleanupOrphanedData();
-  }, 3600000); // 1 hour
+  }, 3600000);
 });
 
 // Cleanup function to remove data for deleted channels
 async function cleanupOrphanedData() {
   console.log('🧹 Running cleanup...');
   let cleaned = false;
-
+  
   for (const [ticketId, channels] of ticketChannels.entries()) {
     const guild = client.guilds.cache.find(g => g.channels.cache.has(ticketId));
     if (!guild) {
@@ -134,7 +199,7 @@ async function cleanupOrphanedData() {
       console.log(`🗑️ Removed orphaned ticket ${ticketId}`);
     }
   }
-
+  
   // Clean up shop items from users who left all servers
   for (const [guildId, shops] of shopListings.entries()) {
     const guild = client.guilds.cache.get(guildId);
@@ -144,7 +209,7 @@ async function cleanupOrphanedData() {
       console.log(`🗑️ Removed shop data for deleted guild ${guildId}`);
       continue;
     }
-
+    
     for (const [userId, items] of shops.entries()) {
       const member = await guild.members.fetch(userId).catch(() => null);
       if (!member) {
@@ -154,7 +219,7 @@ async function cleanupOrphanedData() {
       }
     }
   }
-
+  
   if (cleaned) {
     await saveData();
     console.log('✅ Cleanup complete and saved to MongoDB');
@@ -457,7 +522,6 @@ client.on('messageCreate', async (message) => {
       permissionOverwrites.push({ id: message.guild.id, deny: [PermissionFlagsBits.ViewChannel] });
       permissionOverwrites.push({ id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks] });
       if (ticketOwner) permissionOverwrites.push({ id: ticketOwner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-      permissionOverwrites.push({ id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       const admins = adminUsers.get(message.guild.id) || [];
       for (const adminId of admins) {
         permissionOverwrites.push({ id: adminId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
@@ -504,9 +568,23 @@ client.on('messageCreate', async (message) => {
     const lines = fullText.split('\n');
     const title = lines[0];
     const text = lines.slice(1).join('\n');
-    const embed = new EmbedBuilder().setColor('#00BFFF').setTitle(`🎫 ${title}`).setTimestamp().setFooter({ text: 'Click the button below to create a ticket' });
-    if (text.trim()) embed.setDescription(text);
-    const button = new ButtonBuilder().setCustomId('create_ticket').setLabel('Create a Ticket').setEmoji('🎫').setStyle(ButtonStyle.Primary);
+    
+    const embed = new EmbedBuilder()
+      .setColor('#00FFFF')
+      .setAuthor({ name: 'Support Ticket System', iconURL: message.guild.iconURL() })
+      .setTitle(`🎫 ${title}`)
+      .setDescription(text || 'Click the button below to create a support ticket')
+      .addFields({ name: '📋 What happens next?', value: 'Our team will assist you shortly after you create a ticket', inline: false })
+      .setThumbnail(message.guild.iconURL())
+      .setFooter({ text: 'Click the button below to get started' })
+      .setTimestamp();
+
+    const button = new ButtonBuilder()
+      .setCustomId('create_ticket')
+      .setLabel('Create a Ticket')
+      .setEmoji('🎫')
+      .setStyle(ButtonStyle.Primary);
+
     const row = new ActionRowBuilder().addComponents(button);
     try {
       await message.delete();
@@ -549,6 +627,7 @@ client.on('messageCreate', async (message) => {
         { name: '!conweb <id>', value: '⚙️ Set webhook category', inline: false },
         { name: '!conorders <id>', value: '⚙️ Set orders log channel', inline: false },
         { name: '!condone <id>', value: '⚙️ Set done log channel', inline: false },
+        { name: '!conshop <id>', value: '⚙️ Set shop ticket category', inline: false },
         { name: '!admadm <user_id>', value: '👑 Add admin', inline: false },
         { name: '!admrem <user_id>', value: '👑 Remove admin', inline: false },
         { name: '!admlist', value: '👑 List all admins', inline: false }
@@ -677,14 +756,24 @@ client.on('interactionCreate', async (interaction) => {
       if (doneChannelId) {
         const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
         if (doneChannel) {
+          const currentTimestamp = Math.floor(Date.now() / 1000);
           const doneEmbed = new EmbedBuilder()
-            .setColor('#00FF00')
-            .setAuthor({ name: `${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} Received His Service`, iconURL: ticketOwner ? ticketOwner.user.displayAvatarURL() : undefined })
-            .addFields({ name: 'Service Ordered:', value: serviceDescription })
-            .setFooter({ text: `Confirmed by: ${interaction.user.tag}` })
+            .setColor('#00FF7F')
+            .setAuthor({ name: '✅ Service Completed', iconURL: interaction.guild.iconURL() })
+            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!`)
+            .setDescription(`🎉 **Service successfully delivered and confirmed!**\n\n📦 **Service Details:**\n${serviceDescription}`)
+            .addFields(
+              { name: '👤 Customer', value: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, inline: true },
+              { name: '✅ Confirmed By', value: `${interaction.user}`, inline: true },
+              { name: '⏰ Completed At', value: `<t:${currentTimestamp}:F>\n(<t:${currentTimestamp}:R>)`, inline: false }
+            )
+            .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ dynamic: true, size: 256 }) : null)
+            .setImage(interaction.user.displayAvatarURL({ dynamic: true, size: 512 }))
+            .setFooter({ text: `Admin: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
             .setTimestamp();
           const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
           await sentMessage.react('✅');
+          await sentMessage.react('🎉');
         }
       }
       await interaction.update({ content: `✅ **Service confirmed as completed by ${interaction.user}!**\n\nClosing ticket in 5 seconds...`, components: [] });
@@ -736,19 +825,27 @@ client.on('interactionCreate', async (interaction) => {
         const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
         await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket Created by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
-
+        
         // Save ticket owner
         ticketOwners.set(ticketChannel.id, interaction.user.id);
         saveData();
-
+        
         const orderChannelId = orderChannels.get(interaction.guild.id);
         if (orderChannelId) {
           const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
           if (orderChannel) {
+            const orderTimestamp = Math.floor(Date.now() / 1000);
             const orderEmbed = new EmbedBuilder()
-              .setColor('#FFA500')
-              .setAuthor({ name: `${interaction.user.tag} has ordered`, iconURL: interaction.user.displayAvatarURL() })
-              .addFields({ name: 'Service Ordered:', value: serviceDescription })
+              .setColor('#FF6B35')
+              .setAuthor({ name: '📦 New Order Received!', iconURL: interaction.guild.iconURL() })
+              .setTitle(`Order from ${interaction.user.tag}`)
+              .setDescription(`🎉 **A new order has been placed!**\n\n📋 **Service Details:**\n${serviceDescription}`)
+              .addFields(
+                { name: '👤 Customer', value: `${interaction.user}`, inline: true },
+                { name: '⏰ Ordered At', value: `<t:${orderTimestamp}:F>\n(<t:${orderTimestamp}:R>)`, inline: false }
+              )
+              .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
+              .setFooter({ text: 'Order Management System' })
               .setTimestamp();
             await orderChannel.send({ embeds: [orderEmbed] });
           }
@@ -795,13 +892,13 @@ client.on('interactionCreate', async (interaction) => {
       const sellerItems = guildShops.get(sellerId) || [];
       const item = sellerItems.find(i => i.id === itemId);
       if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-
+      
       const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
       const buyer = interaction.user;
 
       // Create ticket between buyer and seller
-      const categoryId = ticketCategories.get(interaction.guild.id);
-      if (!categoryId) return interaction.reply({ content: '❌ Ticket category not set! Ask admin to use !concategory', ephemeral: true });
+      const categoryId = shopCategories.get(interaction.guild.id) || ticketCategories.get(interaction.guild.id);
+      if (!categoryId) return interaction.reply({ content: '❌ Shop ticket category not set! Ask admin to use !conshop', ephemeral: true });
 
       try {
         const ticketChannel = await interaction.guild.channels.create({
