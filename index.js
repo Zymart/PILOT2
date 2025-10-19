@@ -1,296 +1,4 @@
-}
-
-  if (interaction.isModalSubmit()) {
-    if (interaction.customId === 'ticket_modal') {
-      const serviceDescription = interaction.fields.getTextInputValue('service_type');
-      const categoryId = ticketCategories.get(interaction.guild.id);
-      try {
-        const ticketChannel = await interaction.guild.channels.create({
-          name: `ticket-${interaction.user.username}`,
-          type: ChannelType.GuildText,
-          parent: categoryId,
-          permissionOverwrites: [
-            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-          ],
-        });
-        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
-        if (staffRole) {
-          await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        }
-        const doneButton = new ButtonBuilder().setCustomId('done_ticket').setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
-        await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket Created by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
-
-        ticketOwners.set(ticketChannel.id, interaction.user.id);
-        saveData();
-
-        const orderChannelId = orderChannels.get(interaction.guild.id);
-        if (orderChannelId) {
-          const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
-          if (orderChannel) {
-            const orderTimestamp = Math.floor(Date.now() / 1000);
-            const orderEmbed = new EmbedBuilder()
-              .setColor('#FF6B35')
-              .setAuthor({ name: '📦 New Order Received!', iconURL: interaction.guild.iconURL() })
-              .setTitle(`Order from ${interaction.user.tag}`)
-              .setDescription(`🎉 **A new order has been placed!**\n\n📋 **Service Details:**\n${serviceDescription}`)
-              .addFields(
-                { name: '👤 Customer', value: `${interaction.user}`, inline: true },
-                { name: '⏰ Ordered At', value: `<t:${orderTimestamp}:F>\n(<t:${orderTimestamp}:R>)`, inline: false }
-              )
-              .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
-              .setFooter({ text: 'Order Management System' })
-              .setTimestamp();
-            await orderChannel.send({ embeds: [orderEmbed] });
-          }
-        }
-        interaction.reply({ content: `✅ Ticket created! <#${ticketChannel.id}>`, ephemeral: true });
-      } catch (err) {
-        console.error(err);
-        interaction.reply({ content: '❌ Failed to create ticket!', ephemeral: true });
-      }
-    }
-
-    if (interaction.customId === 'shop_add_modal') {
-      const itemName = interaction.fields.getTextInputValue('item_name');
-      const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
-      const itemPrice = interaction.fields.getTextInputValue('item_price');
-
-      if (isNaN(itemStock) || itemStock < 0) {
-        return interaction.reply({ content: '❌ Invalid stock number!', ephemeral: true });
-      }
-
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-
-      const itemId = `${Date.now()}`;
-      userItems.push({ 
-        id: itemId, 
-        name: itemName, 
-        price: itemPrice, 
-        stock: itemStock,
-        seller: interaction.user.tag 
-      });
-
-      guildShops.set(interaction.user.id, userItems);
-      shopListings.set(interaction.guild.id, guildShops);
-      await saveData();
-
-      interaction.reply({ 
-        content: `✅ Added **${itemName}** for **${itemPrice}** with **${itemStock}** stock to your shop!`, 
-        ephemeral: true 
-      });
-    }
-
-    if (interaction.customId.startsWith('shop_change_modal_')) {
-      const itemId = interaction.customId.replace('shop_change_modal_', '');
-      const itemName = interaction.fields.getTextInputValue('item_name');
-      const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
-      const itemPrice = interaction.fields.getTextInputValue('item_price');
-
-      if (isNaN(itemStock) || itemStock < 0) {
-        return interaction.reply({ content: '❌ Invalid stock number!', ephemeral: true });
-      }
-
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-      const itemIndex = userItems.findIndex(i => i.id === itemId);
-
-      if (itemIndex === -1) {
-        return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-      }
-
-      userItems[itemIndex].name = itemName;
-      userItems[itemIndex].price = itemPrice;
-      userItems[itemIndex].stock = itemStock;
-
-      guildShops.set(interaction.user.id, userItems);
-      shopListings.set(interaction.guild.id, guildShops);
-      await saveData();
-
-      interaction.reply({ 
-        content: `✅ Updated **${itemName}** - Price: **${itemPrice}**, Stock: **${itemStock}**`, 
-        ephemeral: true 
-      });
-    }
-  }
-
-  if (interaction.isStringSelectMenu()) {
-    if (interaction.customId === 'shop_remove_select') {
-      const itemId = interaction.values[0];
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-      const item = userItems.find(i => i.id === itemId);
-
-      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-
-      const confirmButton = new ButtonBuilder()
-        .setCustomId(`shop_confirm_remove_${itemId}`)
-        .setLabel('Confirm Remove')
-        .setStyle(ButtonStyle.Danger);
-
-      const cancelButton = new ButtonBuilder()
-        .setCustomId('shop_cancel_remove')
-        .setLabel('Cancel')
-        .setStyle(ButtonStyle.Secondary);
-
-      const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
-
-      interaction.update({
-        content: `⚠️ Are you sure you want to remove **${item.name}**?`,
-        components: [row]
-      });
-    }
-
-    if (interaction.customId === 'shop_change_select') {
-      const itemId = interaction.values[0];
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const userItems = guildShops.get(interaction.user.id) || [];
-      const item = userItems.find(i => i.id === itemId);
-
-      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-
-      const modal = new ModalBuilder()
-        .setCustomId(`shop_change_modal_${itemId}`)
-        .setTitle('Edit Item');
-
-      const nameInput = new TextInputBuilder()
-        .setCustomId('item_name')
-        .setLabel('Item Name')
-        .setValue(item.name)
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const stockInput = new TextInputBuilder()
-        .setCustomId('item_stock')
-        .setLabel('Stock')
-        .setValue(String(item.stock || 0))
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const priceInput = new TextInputBuilder()
-        .setCustomId('item_price')
-        .setLabel('Price')
-        .setValue(item.price)
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const row1 = new ActionRowBuilder().addComponents(nameInput);
-      const row2 = new ActionRowBuilder().addComponents(stockInput);
-      const row3 = new ActionRowBuilder().addComponents(priceInput);
-
-      modal.addComponents(row1, row2, row3);
-      await interaction.showModal(modal);
-    }
-
-    if (interaction.customId === 'shop_select_item') {
-      const [sellerId, itemId] = interaction.values[0].split('-');
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const sellerItems = guildShops.get(sellerId) || [];
-      const item = sellerItems.find(i => i.id === itemId);
-
-      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-
-      if ((item.stock || 0) <= 0) {
-        return interaction.reply({ content: '❌ This item is out of stock!', ephemeral: true });
-      }
-
-      const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
-      const buyer = interaction.user;
-
-      const categoryId = shopCategories.get(interaction.guild.id) || ticketCategories.get(interaction.guild.id);
-      if (!categoryId) return interaction.reply({ content: '❌ Shop ticket category not set! Ask admin to use !conshop', ephemeral: true });
-
-      try {
-        const ticketChannel = await interaction.guild.channels.create({
-          name: `shop-${buyer.username}-${seller ? seller.username : 'seller'}`,
-          type: ChannelType.GuildText,
-          parent: categoryId,
-          permissionOverwrites: [
-            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: buyer.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-            { id: sellerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-          ],
-        });
-
-        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
-        if (staffRole) {
-          await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        }
-
-        await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-
-        const admins = adminUsers.get(interaction.guild.id) || [];
-        for (const adminId of admins) {
-          await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        }
-
-        const doneButton = new ButtonBuilder().setCustomId(`shop_trade_done_${sellerId}_${itemId}`).setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
-
-        const itemEmbed = new EmbedBuilder()
-          .setColor('#FFD700')
-          .setTitle('🛍️ Shop Transaction')
-          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n**Item:** ${item.name}\n**Price:** ${item.price}\n**Stock:** ${item.stock}`)
-          .setTimestamp();
-
-        await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
-
-        interaction.reply({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, ephemeral: true });
-      } catch (err) {
-        console.error('Shop Ticket Error:', err);
-        interaction.reply({ content: '❌ Failed to create shop ticket!', ephemeral: true });
-      }
-    }
-  }
-
-  // Handle shop trade done button
-  if (interaction.isButton() && interaction.customId.startsWith('shop_trade_done_')) {
-    const parts = interaction.customId.replace('shop_trade_done_', '').split('_');
-    const sellerId = parts[0];
-    const itemId = parts[1];
-
-    const guildShops = shopListings.get(interaction.guild.id) || new Map();
-    const sellerItems = guildShops.get(sellerId) || [];
-    const item = sellerItems.find(i => i.id === itemId);
-
-    if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-
-    // Reduce stock by 1
-    item.stock = Math.max(0, (item.stock || 0) - 1);
-    guildShops.set(sellerId, sellerItems);
-    shopListings.set(interaction.guild.id, guildShops);
-    await saveData();
-
-    // Log to trade channel
-    const tradeChannelId = tradeChannels.get(interaction.guild.id);
-    if (tradeChannelId) {
-      const tradeChannel = interaction.guild.channels.cache.get(tradeChannelId);
-      if (tradeChannel) {
-        const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
-        const tradeEmbed = new EmbedBuilder()
-          .setColor('#00FF7F')
-          .setTitle('✅ Trade Completed')
-          .setDescription(`**Item:** ${item.name}\n**Price:** ${item.price}\n**Seller:** ${seller ? seller : `<@${sellerId}>`}\n**Buyer:** ${interaction.user}\n\n**Remaining Stock:** ${item.stock}`)
-          .setTimestamp();
-        await tradeChannel.send({ embeds: [tradeEmbed] });
-      }
-    }
-
-    await interaction.update({ content: `✅ Trade completed! Stock updated to **${item.stock}**. Closing in 5 seconds...`, components: [] });
-
-    setTimeout(async () => {
-      await interaction.channel.delete().catch(console.error);
-    }, 5000);
-  }
-});
-
-client.login(process.env.TOKEN);// Fix for ReadableStream error in Replit
+// Fix for ReadableStream error in Replit
 if (!global.ReadableStream) {
   global.ReadableStream = require('stream/web').ReadableStream;
 }
@@ -376,8 +84,7 @@ async function saveData() {
     ),
     ticketOwners: Object.fromEntries(ticketOwners),
     shopCategories: Object.fromEntries(shopCategories),
-    transcriptChannels: Object.fromEntries(transcriptChannels),
-    tradeChannels: Object.fromEntries(tradeChannels)
+    transcriptChannels: Object.fromEntries(transcriptChannels)
   };
 
   return new Promise((resolve) => {
@@ -427,8 +134,7 @@ function parseData(data) {
     shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
     ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
     shopCategories: new Map(Object.entries(data.shopCategories || {})),
-    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
-    tradeChannels: new Map(Object.entries(data.tradeChannels || {}))
+    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {}))
   };
 }
 
@@ -443,8 +149,7 @@ function getEmptyData() {
     shopListings: new Map(),
     ticketOwners: new Map(),
     shopCategories: new Map(),
-    transcriptChannels: new Map(),
-    tradeChannels: new Map()
+    transcriptChannels: new Map()
   };
 }
 
@@ -458,7 +163,6 @@ let shopListings = new Map();
 let ticketOwners = new Map();
 let shopCategories = new Map();
 let transcriptChannels = new Map();
-let tradeChannels = new Map();
 
 client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
@@ -473,9 +177,8 @@ client.once('ready', async () => {
   ticketOwners = loadedData.ticketOwners;
   shopCategories = loadedData.shopCategories;
   transcriptChannels = loadedData.transcriptChannels;
-  tradeChannels = loadedData.tradeChannels;
   console.log('✅ Data loaded from cloud storage');
-
+  
   // Cleanup orphaned data every hour
   setInterval(async () => {
     await cleanupOrphanedData();
@@ -486,7 +189,7 @@ client.once('ready', async () => {
 async function cleanupOrphanedData() {
   console.log('🧹 Running cleanup...');
   let cleaned = false;
-
+  
   for (const [ticketId, channels] of ticketChannels.entries()) {
     const guild = client.guilds.cache.find(g => g.channels.cache.has(ticketId));
     if (!guild) {
@@ -496,7 +199,7 @@ async function cleanupOrphanedData() {
       console.log(`🗑️ Removed orphaned ticket ${ticketId}`);
     }
   }
-
+  
   // Clean up shop items from users who left all servers
   for (const [guildId, shops] of shopListings.entries()) {
     const guild = client.guilds.cache.get(guildId);
@@ -506,7 +209,7 @@ async function cleanupOrphanedData() {
       console.log(`🗑️ Removed shop data for deleted guild ${guildId}`);
       continue;
     }
-
+    
     for (const [userId, items] of shops.entries()) {
       const member = await guild.members.fetch(userId).catch(() => null);
       if (!member) {
@@ -516,10 +219,10 @@ async function cleanupOrphanedData() {
       }
     }
   }
-
+  
   if (cleaned) {
     await saveData();
-    console.log('✅ Cleanup complete and saved');
+    console.log('✅ Cleanup complete and saved to MongoDB');
   } else {
     console.log('✅ No cleanup needed');
   }
@@ -803,39 +506,6 @@ client.on('messageCreate', async (message) => {
     message.reply(`✅ Done log channel set to: <#${channelId}>`);
   }
 
-  if (command === 'conshop') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
-    const categoryId = args[0];
-    if (!categoryId) return message.reply('Usage: `!conshop CATEGORY_ID`');
-    const category = message.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
-    shopCategories.set(message.guild.id, categoryId);
-    saveData();
-    message.reply(`✅ Shop ticket category set to: **${category.name}**`);
-  }
-
-  if (command === 'contrade') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
-    const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!contrade CHANNEL_ID`');
-    const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
-    tradeChannels.set(message.guild.id, channelId);
-    saveData();
-    message.reply(`✅ Trade log channel set to: <#${channelId}>`);
-  }
-
-  if (command === 'contranscript') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
-    const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!contranscript CHANNEL_ID`');
-    const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
-    transcriptChannels.set(message.guild.id, channelId);
-    saveData();
-    message.reply(`✅ Transcript log channel set to: <#${channelId}>`);
-  }
-
   if (command === 'createweb') {
     const channelName = args.join('-').toLowerCase();
     if (!channelName) return message.reply('Usage: `!createweb channel-name`');
@@ -852,7 +522,6 @@ client.on('messageCreate', async (message) => {
       permissionOverwrites.push({ id: message.guild.id, deny: [PermissionFlagsBits.ViewChannel] });
       permissionOverwrites.push({ id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks] });
       if (ticketOwner) permissionOverwrites.push({ id: ticketOwner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-      permissionOverwrites.push({ id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       const admins = adminUsers.get(message.guild.id) || [];
       for (const adminId of admins) {
         permissionOverwrites.push({ id: adminId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
@@ -899,7 +568,7 @@ client.on('messageCreate', async (message) => {
     const lines = fullText.split('\n');
     const title = lines[0];
     const text = lines.slice(1).join('\n');
-
+    
     const embed = new EmbedBuilder()
       .setColor('#00FFFF')
       .setAuthor({ name: 'Support Ticket System', iconURL: message.guild.iconURL() })
@@ -959,8 +628,6 @@ client.on('messageCreate', async (message) => {
         { name: '!conorders <id>', value: '⚙️ Set orders log channel', inline: false },
         { name: '!condone <id>', value: '⚙️ Set done log channel', inline: false },
         { name: '!conshop <id>', value: '⚙️ Set shop ticket category', inline: false },
-        { name: '!contrade <id>', value: '⚙️ Set trade log channel', inline: false },
-        { name: '!contranscript <id>', value: '⚙️ Set transcript log channel', inline: false },
         { name: '!admadm <user_id>', value: '👑 Add admin', inline: false },
         { name: '!admrem <user_id>', value: '👑 Remove admin', inline: false },
         { name: '!admlist', value: '👑 List all admins', inline: false }
@@ -982,18 +649,11 @@ client.on('interactionCreate', async (interaction) => {
         const user = await interaction.client.users.fetch(userId).catch(() => null);
         const userName = user ? user.username : 'Unknown';
         for (const item of items) {
-          if (optionCount < 25 && (item.stock || 0) > 0) {
-            selectOptions.push({ 
-              label: `${item.name} - ${item.price} (Stock: ${item.stock || 0})`, 
-              description: `Seller: ${userName}`, 
-              value: `${userId}-${item.id}` 
-            });
+          if (optionCount < 25) {
+            selectOptions.push({ label: `${item.name} - ${item.price}`, description: `Seller: ${userName}`, value: `${userId}-${item.id}` });
             optionCount++;
           }
         }
-      }
-      if (selectOptions.length === 0) {
-        return interaction.reply({ content: '❌ No items in stock!', ephemeral: true });
       }
       const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_select_item').setPlaceholder('Select an item to buy').addOptions(selectOptions);
       const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -1001,111 +661,15 @@ client.on('interactionCreate', async (interaction) => {
     }
 
     if (interaction.customId === 'shop_manage') {
-      const addButton = new ButtonBuilder()
-        .setCustomId('shop_add')
-        .setLabel('Add Item')
-        .setEmoji('➕')
-        .setStyle(ButtonStyle.Success);
-
-      const removeButton = new ButtonBuilder()
-        .setCustomId('shop_remove')
-        .setLabel('Remove Item')
-        .setEmoji('➖')
-        .setStyle(ButtonStyle.Danger);
-
-      const changeButton = new ButtonBuilder()
-        .setCustomId('shop_change')
-        .setLabel('Change Item')
-        .setEmoji('✏️')
-        .setStyle(ButtonStyle.Primary);
-
-      const row = new ActionRowBuilder().addComponents(addButton, removeButton, changeButton);
-
-      interaction.reply({ 
-        content: '🛒 **Manage Your Shop**\nChoose an action:', 
-        components: [row], 
-        ephemeral: true 
-      });
-    }
-
-    if (interaction.customId === 'shop_add') {
-      const modal = new ModalBuilder()
-        .setCustomId('shop_add_modal')
-        .setTitle('Add Item to Shop');
-
-      const nameInput = new TextInputBuilder()
-        .setCustomId('item_name')
-        .setLabel('Item Name')
-        .setPlaceholder('e.g., Diamond Sword')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const stockInput = new TextInputBuilder()
-        .setCustomId('item_stock')
-        .setLabel('Stock')
-        .setPlaceholder('e.g., 10')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const priceInput = new TextInputBuilder()
-        .setCustomId('item_price')
-        .setLabel('Price')
-        .setPlaceholder('e.g., 100')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const row1 = new ActionRowBuilder().addComponents(nameInput);
-      const row2 = new ActionRowBuilder().addComponents(stockInput);
+      const manageModal = new ModalBuilder().setCustomId('shop_manage_modal').setTitle('Manage Your Shop');
+      const actionInput = new TextInputBuilder().setCustomId('shop_action').setLabel('Action (add/remove)').setPlaceholder('Type: add or remove').setStyle(TextInputStyle.Short).setRequired(true);
+      const itemNameInput = new TextInputBuilder().setCustomId('shop_item_name').setLabel('Item Name').setPlaceholder('e.g., Diamond Sword').setStyle(TextInputStyle.Short).setRequired(true);
+      const priceInput = new TextInputBuilder().setCustomId('shop_price').setLabel('Price').setPlaceholder('e.g., 100').setStyle(TextInputStyle.Short).setRequired(true);
+      const row1 = new ActionRowBuilder().addComponents(actionInput);
+      const row2 = new ActionRowBuilder().addComponents(itemNameInput);
       const row3 = new ActionRowBuilder().addComponents(priceInput);
-
-      modal.addComponents(row1, row2, row3);
-      await interaction.showModal(modal);
-    }
-
-    if (interaction.customId === 'shop_remove') {
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const userItems = guildShops.get(interaction.user.id) || [];
-
-      if (userItems.length === 0) {
-        return interaction.reply({ content: '❌ You have no items in your shop!', ephemeral: true });
-      }
-
-      const selectOptions = userItems.map(item => ({
-        label: `${item.name} (Stock: ${item.stock || 0})`,
-        description: `Price: ${item.price}`,
-        value: item.id
-      }));
-
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('shop_remove_select')
-        .setPlaceholder('Select an item to remove')
-        .addOptions(selectOptions);
-
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ content: '🗑️ Select an item to remove:', components: [row], ephemeral: true });
-    }
-
-    if (interaction.customId === 'shop_change') {
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const userItems = guildShops.get(interaction.user.id) || [];
-
-      if (userItems.length === 0) {
-        return interaction.reply({ content: '❌ You have no items in your shop!', ephemeral: true });
-      }
-
-      const selectOptions = userItems.map(item => ({
-        label: `${item.name} (Stock: ${item.stock || 0})`,
-        description: `Price: ${item.price}`,
-        value: item.id
-      }));
-
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('shop_change_select')
-        .setPlaceholder('Select an item to edit')
-        .addOptions(selectOptions);
-
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ content: '✏️ Select an item to edit:', components: [row], ephemeral: true });
+      manageModal.addComponents(row1, row2, row3);
+      await interaction.showModal(manageModal);
     }
 
     if (interaction.customId === 'create_ticket') {
@@ -1122,29 +686,8 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.showModal(modal);
     }
 
-    if (interaction.customId.startsWith('shop_confirm_remove_')) {
-      const itemId = interaction.customId.replace('shop_confirm_remove_', '');
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-      const itemIndex = userItems.findIndex(i => i.id === itemId);
-
-      if (itemIndex === -1) return interaction.update({ content: '❌ Item not found!', components: [] });
-
-      const itemName = userItems[itemIndex].name;
-      userItems.splice(itemIndex, 1);
-      guildShops.set(interaction.user.id, userItems);
-      shopListings.set(interaction.guild.id, guildShops);
-      await saveData();
-
-      interaction.update({ content: `✅ Removed **${itemName}** from your shop!`, components: [] });
-    }
-
-    if (interaction.customId === 'shop_cancel_remove') {
-      interaction.update({ content: '❌ Cancelled. Item not removed.', components: [] });
-    }
-
     if (interaction.customId === 'close_ticket') {
-      if (!interaction.channel.name.startsWith('ticket-') && !interaction.channel.name.startsWith('shop-')) return interaction.reply({ content: '❌ Not a ticket channel!', ephemeral: true });
+      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket channel!', ephemeral: true });
       await interaction.reply('🔒 Closing in 5 seconds...');
       setTimeout(async () => {
         const ticketId = interaction.channel.id;
@@ -1153,6 +696,7 @@ client.on('interactionCreate', async (interaction) => {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) await channelToDelete.delete().catch(console.error);
         }
+        // Remove ticket data from MongoDB
         ticketChannels.delete(ticketId);
         ticketOwners.delete(ticketId);
         await saveData();
@@ -1240,6 +784,7 @@ client.on('interactionCreate', async (interaction) => {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) await channelToDelete.delete().catch(console.error);
         }
+        // Remove ticket data from MongoDB
         ticketChannels.delete(ticketId);
         ticketOwners.delete(ticketId);
         await saveData();
@@ -1255,3 +800,152 @@ client.on('interactionCreate', async (interaction) => {
       if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins can deny!', ephemeral: true });
       await interaction.update({ content: `❌ **Request denied by ${interaction.user}.**\n\nThe service is not yet complete. Please continue working on it.`, components: [] });
     }
+  }
+
+  if (interaction.isModalSubmit()) {
+    if (interaction.customId === 'ticket_modal') {
+      const serviceDescription = interaction.fields.getTextInputValue('service_type');
+      const categoryId = ticketCategories.get(interaction.guild.id);
+      try {
+        const ticketChannel = await interaction.guild.channels.create({
+          name: `ticket-${interaction.user.username}`,
+          type: ChannelType.GuildText,
+          parent: categoryId,
+          permissionOverwrites: [
+            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+          ],
+        });
+        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
+        if (staffRole) {
+          await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        }
+        const doneButton = new ButtonBuilder().setCustomId('done_ticket').setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
+        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
+        const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
+        await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket Created by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
+        
+        // Save ticket owner
+        ticketOwners.set(ticketChannel.id, interaction.user.id);
+        saveData();
+        
+        const orderChannelId = orderChannels.get(interaction.guild.id);
+        if (orderChannelId) {
+          const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
+          if (orderChannel) {
+            const orderTimestamp = Math.floor(Date.now() / 1000);
+            const orderEmbed = new EmbedBuilder()
+              .setColor('#FF6B35')
+              .setAuthor({ name: '📦 New Order Received!', iconURL: interaction.guild.iconURL() })
+              .setTitle(`Order from ${interaction.user.tag}`)
+              .setDescription(`🎉 **A new order has been placed!**\n\n📋 **Service Details:**\n${serviceDescription}`)
+              .addFields(
+                { name: '👤 Customer', value: `${interaction.user}`, inline: true },
+                { name: '⏰ Ordered At', value: `<t:${orderTimestamp}:F>\n(<t:${orderTimestamp}:R>)`, inline: false }
+              )
+              .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
+              .setFooter({ text: 'Order Management System' })
+              .setTimestamp();
+            await orderChannel.send({ embeds: [orderEmbed] });
+          }
+        }
+        interaction.reply({ content: `✅ Ticket created! <#${ticketChannel.id}>`, ephemeral: true });
+      } catch (err) {
+        console.error(err);
+        interaction.reply({ content: '❌ Failed to create ticket!', ephemeral: true });
+      }
+    }
+
+    if (interaction.customId === 'shop_manage_modal') {
+      const action = interaction.fields.getTextInputValue('shop_action').toLowerCase();
+      const itemName = interaction.fields.getTextInputValue('shop_item_name');
+      const price = interaction.fields.getTextInputValue('shop_price');
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      let userItems = guildShops.get(interaction.user.id) || [];
+      if (action === 'add') {
+        const itemId = `${Date.now()}`;
+        userItems.push({ id: itemId, name: itemName, price: price, seller: interaction.user.tag });
+        guildShops.set(interaction.user.id, userItems);
+        shopListings.set(interaction.guild.id, guildShops);
+        saveData();
+        interaction.reply({ content: `✅ Added **${itemName}** for **${price}** to your shop!`, ephemeral: true });
+      } else if (action === 'remove') {
+        const itemIndex = userItems.findIndex(item => item.name.toLowerCase() === itemName.toLowerCase());
+        if (itemIndex === -1) return interaction.reply({ content: `❌ Item **${itemName}** not found!`, ephemeral: true });
+        userItems.splice(itemIndex, 1);
+        guildShops.set(interaction.user.id, userItems);
+        shopListings.set(interaction.guild.id, guildShops);
+        await saveData();
+        console.log(`🗑️ Removed item ${itemName} from shop in database`);
+        interaction.reply({ content: `✅ Removed **${itemName}** from your shop!`, ephemeral: true });
+      } else {
+        interaction.reply({ content: '❌ Invalid action! Use "add" or "remove".', ephemeral: true });
+      }
+    }
+  }
+
+  if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'shop_select_item') {
+      const [sellerId, itemId] = interaction.values[0].split('-');
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      const sellerItems = guildShops.get(sellerId) || [];
+      const item = sellerItems.find(i => i.id === itemId);
+      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
+      
+      const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
+      const buyer = interaction.user;
+
+      // Create ticket between buyer and seller
+      const categoryId = shopCategories.get(interaction.guild.id) || ticketCategories.get(interaction.guild.id);
+      if (!categoryId) return interaction.reply({ content: '❌ Shop ticket category not set! Ask admin to use !conshop', ephemeral: true });
+
+      try {
+        const ticketChannel = await interaction.guild.channels.create({
+          name: `shop-${buyer.username}-${seller ? seller.username : 'seller'}`,
+          type: ChannelType.GuildText,
+          parent: categoryId,
+          permissionOverwrites: [
+            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            { id: buyer.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+            { id: sellerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+          ],
+        });
+
+        // Add staff role permissions
+        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
+        if (staffRole) {
+          await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        }
+
+        // Add owner permissions
+        await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+
+        // Add admin permissions
+        const admins = adminUsers.get(interaction.guild.id) || [];
+        for (const adminId of admins) {
+          await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        }
+
+        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
+        const row = new ActionRowBuilder().addComponents(closeButton);
+
+        const itemEmbed = new EmbedBuilder()
+          .setColor('#FFD700')
+          .setTitle('🛍️ Shop Transaction')
+          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n**Item:** ${item.name}\n**Price:** ${item.price}`)
+          .setTimestamp();
+
+        await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
+
+        interaction.reply({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, ephemeral: true });
+      } catch (err) {
+        console.error('Shop Ticket Error:', err);
+        interaction.reply({ content: '❌ Failed to create shop ticket!', ephemeral: true });
+      }
+    }
+  }
+});
+
+client.login(process.env.TOKEN);
