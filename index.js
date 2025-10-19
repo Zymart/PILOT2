@@ -828,18 +828,29 @@ client.on('interactionCreate', async (interaction) => {
       const admins = adminUsers.get(interaction.guild.id) || [];
       const isAdmin = admins.includes(interaction.user.id);
       if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
       let serviceDescription = 'N/A';
       try {
-        const messages = await interaction.channel.messages.fetch({ limit: 10 });
-        const firstMessage = messages.reverse().find(m => m.content.includes('Service Request:'));
-        if (firstMessage) {
-          serviceDescription = firstMessage.content.split('Service Request:')[1].trim();
+        const messages = await interaction.channel.messages.fetch({ limit: 50 });
+        const messagesArray = Array.from(messages.values()).reverse();
+
+        // Find the message with Service Request
+        for (const msg of messagesArray) {
+          if (msg.content && msg.content.includes('Service Request:')) {
+            const parts = msg.content.split('Service Request:');
+            if (parts.length > 1) {
+              serviceDescription = parts[1].trim().split('\n')[0].trim();
+              break;
+            }
+          }
         }
       } catch (err) {
-        console.error(err);
+        console.error('Error fetching service description:', err);
       }
+
       const doneChannelId = doneChannels.get(interaction.guild.id);
       if (doneChannelId) {
         const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
@@ -848,20 +859,31 @@ client.on('interactionCreate', async (interaction) => {
           const doneEmbed = new EmbedBuilder()
             .setColor('#00FF7F')
             .setAuthor({ name: '✅ Service Completed', iconURL: interaction.guild.iconURL() })
-            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received service!`)
-            .setDescription(`🎉 **Successfully delivered!**\n\n📦 **Details:**\n${serviceDescription}`)
+            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!`)
+            .setDescription(`🎉 **Service successfully delivered and confirmed!**\n\n📦 **Service Details:**\n${serviceDescription}`)
             .addFields(
               { name: '👤 Customer', value: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, inline: true },
-              { name: '✅ By', value: `${interaction.user}`, inline: true },
-              { name: '⏰ Completed', value: `<t:${currentTimestamp}:F>`, inline: false }
+              { name: '✅ Confirmed By', value: `${interaction.user}`, inline: true },
+              { name: '⏰ Completed At', value: `<t:${currentTimestamp}:F>\n(<t:${currentTimestamp}:R>)`, inline: false }
             )
             .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ size: 256 }) : null)
+            .setImage(interaction.user.displayAvatarURL({ size: 512 }))
             .setFooter({ text: `Admin: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
             .setTimestamp();
-          const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
-          await sentMessage.react('✅');
-          await sentMessage.react('🎉');
+
+          try {
+            const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
+            await sentMessage.react('✅');
+            await sentMessage.react('🎉');
+            console.log(`✅ Sent done log to channel ${doneChannelId}`);
+          } catch (err) {
+            console.error('Error sending to done channel:', err);
+          }
+        } else {
+          console.error(`❌ Done channel ${doneChannelId} not found`);
         }
+      } else {
+        console.log('⚠️ No done channel configured for this guild');
       }
       await interaction.update({ content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, components: [] });
       setTimeout(async () => {
