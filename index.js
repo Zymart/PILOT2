@@ -17,11 +17,9 @@ const client = new Client({
 const PREFIX = '!';
 const OWNER_ID = '730629579533844512';
 
-// JSONBin.io cloud storage (free, no database setup needed)
 const JSONBIN_API_KEY = process.env.JSONBIN_API_KEY || '';
 const JSONBIN_BIN_ID = process.env.JSONBIN_BIN_ID || '';
 
-// Load data from JSONBin cloud storage
 async function loadData() {
   if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) {
     console.log('⚠️ JSONBin not configured, using empty data');
@@ -33,9 +31,7 @@ async function loadData() {
       hostname: 'api.jsonbin.io',
       path: `/v3/b/${JSONBIN_BIN_ID}/latest`,
       method: 'GET',
-      headers: {
-        'X-Master-Key': JSONBIN_API_KEY
-      }
+      headers: { 'X-Master-Key': JSONBIN_API_KEY }
     };
 
     const req = https.request(options, (res) => {
@@ -62,7 +58,6 @@ async function loadData() {
   });
 }
 
-// Save data to JSONBin cloud storage
 async function saveData() {
   if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) {
     console.log('⚠️ JSONBin not configured, data not saved to cloud');
@@ -84,7 +79,8 @@ async function saveData() {
     ),
     ticketOwners: Object.fromEntries(ticketOwners),
     shopCategories: Object.fromEntries(shopCategories),
-    transcriptChannels: Object.fromEntries(transcriptChannels)
+    transcriptChannels: Object.fromEntries(transcriptChannels),
+    tradeChannels: Object.fromEntries(tradeChannels)
   };
 
   return new Promise((resolve) => {
@@ -134,7 +130,8 @@ function parseData(data) {
     shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
     ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
     shopCategories: new Map(Object.entries(data.shopCategories || {})),
-    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {}))
+    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
+    tradeChannels: new Map(Object.entries(data.tradeChannels || {}))
   };
 }
 
@@ -149,7 +146,8 @@ function getEmptyData() {
     shopListings: new Map(),
     ticketOwners: new Map(),
     shopCategories: new Map(),
-    transcriptChannels: new Map()
+    transcriptChannels: new Map(),
+    tradeChannels: new Map()
   };
 }
 
@@ -163,6 +161,7 @@ let shopListings = new Map();
 let ticketOwners = new Map();
 let shopCategories = new Map();
 let transcriptChannels = new Map();
+let tradeChannels = new Map();
 
 client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
@@ -177,19 +176,18 @@ client.once('ready', async () => {
   ticketOwners = loadedData.ticketOwners;
   shopCategories = loadedData.shopCategories;
   transcriptChannels = loadedData.transcriptChannels;
+  tradeChannels = loadedData.tradeChannels;
   console.log('✅ Data loaded from cloud storage');
-  
-  // Cleanup orphaned data every hour
+
   setInterval(async () => {
     await cleanupOrphanedData();
   }, 3600000);
 });
 
-// Cleanup function to remove data for deleted channels
 async function cleanupOrphanedData() {
   console.log('🧹 Running cleanup...');
   let cleaned = false;
-  
+
   for (const [ticketId, channels] of ticketChannels.entries()) {
     const guild = client.guilds.cache.find(g => g.channels.cache.has(ticketId));
     if (!guild) {
@@ -199,8 +197,7 @@ async function cleanupOrphanedData() {
       console.log(`🗑️ Removed orphaned ticket ${ticketId}`);
     }
   }
-  
-  // Clean up shop items from users who left all servers
+
   for (const [guildId, shops] of shopListings.entries()) {
     const guild = client.guilds.cache.get(guildId);
     if (!guild) {
@@ -209,7 +206,7 @@ async function cleanupOrphanedData() {
       console.log(`🗑️ Removed shop data for deleted guild ${guildId}`);
       continue;
     }
-    
+
     for (const [userId, items] of shops.entries()) {
       const member = await guild.members.fetch(userId).catch(() => null);
       if (!member) {
@@ -219,10 +216,10 @@ async function cleanupOrphanedData() {
       }
     }
   }
-  
+
   if (cleaned) {
     await saveData();
-    console.log('✅ Cleanup complete and saved to MongoDB');
+    console.log('✅ Cleanup complete');
   } else {
     console.log('✅ No cleanup needed');
   }
@@ -268,7 +265,7 @@ client.on('messageCreate', async (message) => {
   }
 
   if (command === 'admlist') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission to use this command!');
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!');
     const guildAdmins = adminUsers.get(message.guild.id) || [];
     if (guildAdmins.length === 0) return message.reply('📋 No admins added yet!');
     let adminList = '📋 **Admin List:**\n\n';
@@ -285,12 +282,12 @@ client.on('messageCreate', async (message) => {
       r.name.toLowerCase().includes('mod') ||
       r.permissions.has(PermissionFlagsBits.Administrator)
     );
-    if (!hasModerator) return message.reply('❌ You don\'t have permission to use bot commands!');
+    if (!hasModerator) return message.reply('❌ You don\'t have permission!');
   }
 
   if (command === 'embed') {
     const text = args.join(' ');
-    if (!text) return message.reply('Please provide a message! Usage: `!embed Your message here`');
+    if (!text) return message.reply('Usage: `!embed Your message here`');
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
       .setDescription(text)
@@ -302,13 +299,13 @@ client.on('messageCreate', async (message) => {
       await sentMessage.react('✨');
     } catch (err) {
       console.error(err);
-      message.reply('❌ Failed to create embed!');
+      message.reply('❌ Failed!');
     }
   }
 
   if (command === 'fancy') {
     const fullText = args.join(' ');
-    if (!fullText) return message.reply('Usage: `!fancy Title\nYour message here`');
+    if (!fullText) return message.reply('Usage: `!fancy Title\nYour message`');
     const lines = fullText.split('\n');
     const title = lines[0];
     const text = lines.slice(1).join('\n');
@@ -330,7 +327,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'announce') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!announce Your announcement here`');
+    if (!text) return message.reply('Usage: `!announce Your announcement`');
     const embed = new EmbedBuilder()
       .setColor('#FFA500')
       .setTitle('📢 ANNOUNCEMENT')
@@ -348,7 +345,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'quote') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!quote Your quote here`');
+    if (!text) return message.reply('Usage: `!quote Your quote`');
     const embed = new EmbedBuilder()
       .setColor('#2F3136')
       .setDescription(`*"${text}"*`)
@@ -366,7 +363,7 @@ client.on('messageCreate', async (message) => {
   if (command === 'colorembed') {
     const color = args[0];
     const text = args.slice(1).join(' ');
-    if (!color || !text) return message.reply('Usage: `!colorembed #FF0000 Your message here`');
+    if (!color || !text) return message.reply('Usage: `!colorembed #FF0000 Message`');
     const embed = new EmbedBuilder()
       .setColor(color)
       .setDescription(text)
@@ -377,13 +374,13 @@ client.on('messageCreate', async (message) => {
       await message.channel.send({ embeds: [embed] });
     } catch (err) {
       console.error(err);
-      message.reply('❌ Invalid color code!');
+      message.reply('❌ Invalid color!');
     }
   }
 
   if (command === 'success') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!success Your message here`');
+    if (!text) return message.reply('Usage: `!success Message`');
     const embed = new EmbedBuilder().setColor('#00FF00').setTitle('✅ Success').setDescription(text).setTimestamp();
     try {
       await message.delete();
@@ -395,7 +392,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'error') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!error Your message here`');
+    if (!text) return message.reply('Usage: `!error Message`');
     const embed = new EmbedBuilder().setColor('#FF0000').setTitle('❌ Error').setDescription(text).setTimestamp();
     try {
       await message.delete();
@@ -407,7 +404,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'info') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!info Your message here`');
+    if (!text) return message.reply('Usage: `!info Message`');
     const embed = new EmbedBuilder().setColor('#00BFFF').setTitle('ℹ️ Information').setDescription(text).setTimestamp();
     try {
       await message.delete();
@@ -419,7 +416,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'auto') {
     let text = args.join(' ');
-    if (!text) return message.reply('Usage: `!auto Your message here`');
+    if (!text) return message.reply('Usage: `!auto Message`');
     const fancyFont = (str) => {
       const normal = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
       const fancy = '𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵';
@@ -481,7 +478,7 @@ client.on('messageCreate', async (message) => {
     if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
     webCategories.set(message.guild.id, categoryId);
     saveData();
-    message.reply(`✅ Webhook channel category set to: **${category.name}**`);
+    message.reply(`✅ Webhook category set to: **${category.name}**`);
   }
 
   if (command === 'conorders') {
@@ -492,7 +489,7 @@ client.on('messageCreate', async (message) => {
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
     orderChannels.set(message.guild.id, channelId);
     saveData();
-    message.reply(`✅ Orders log channel set to: <#${channelId}>`);
+    message.reply(`✅ Orders log set to: <#${channelId}>`);
   }
 
   if (command === 'condone') {
@@ -503,15 +500,48 @@ client.on('messageCreate', async (message) => {
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
     doneChannels.set(message.guild.id, channelId);
     saveData();
-    message.reply(`✅ Done log channel set to: <#${channelId}>`);
+    message.reply(`✅ Done log set to: <#${channelId}>`);
+  }
+
+  if (command === 'conshop') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    const categoryId = args[0];
+    if (!categoryId) return message.reply('Usage: `!conshop CATEGORY_ID`');
+    const category = message.guild.channels.cache.get(categoryId);
+    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
+    shopCategories.set(message.guild.id, categoryId);
+    saveData();
+    message.reply(`✅ Shop category set to: **${category.name}**`);
+  }
+
+  if (command === 'contrade') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    const channelId = args[0];
+    if (!channelId) return message.reply('Usage: `!contrade CHANNEL_ID`');
+    const channel = message.guild.channels.cache.get(channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    tradeChannels.set(message.guild.id, channelId);
+    saveData();
+    message.reply(`✅ Trade log set to: <#${channelId}>`);
+  }
+
+  if (command === 'contranscript') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    const channelId = args[0];
+    if (!channelId) return message.reply('Usage: `!contranscript CHANNEL_ID`');
+    const channel = message.guild.channels.cache.get(channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    transcriptChannels.set(message.guild.id, channelId);
+    saveData();
+    message.reply(`✅ Transcript log set to: <#${channelId}>`);
   }
 
   if (command === 'createweb') {
     const channelName = args.join('-').toLowerCase();
-    if (!channelName) return message.reply('Usage: `!createweb channel-name`');
+    if (!channelName) return message.reply('Usage: `!createweb name`');
     const botMember = message.guild.members.cache.get(client.user.id);
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return message.reply('❌ I need Manage Channels permission!');
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return message.reply('❌ I need Manage Webhooks permission!');
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return message.reply('❌ Need Manage Channels!');
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return message.reply('❌ Need Manage Webhooks!');
     try {
       let permissionOverwrites = [];
       let ticketOwner = null;
@@ -522,6 +552,7 @@ client.on('messageCreate', async (message) => {
       permissionOverwrites.push({ id: message.guild.id, deny: [PermissionFlagsBits.ViewChannel] });
       permissionOverwrites.push({ id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks] });
       if (ticketOwner) permissionOverwrites.push({ id: ticketOwner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      permissionOverwrites.push({ id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       const admins = adminUsers.get(message.guild.id) || [];
       for (const adminId of admins) {
         permissionOverwrites.push({ id: adminId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
@@ -538,27 +569,27 @@ client.on('messageCreate', async (message) => {
       }
       try {
         const webhook = await newChannel.createWebhook({ name: `${channelName}-webhook`, reason: `Created by ${message.author.tag}` });
-        await message.channel.send(`✅ Channel created: <#${newChannel.id}>`);
+        await message.channel.send(`✅ Channel: <#${newChannel.id}>`);
         await message.channel.send(webhook.url);
       } catch (webhookError) {
         console.error('Webhook Error:', webhookError);
-        await message.channel.send(`✅ Channel created: <#${newChannel.id}>\n❌ Webhook failed: ${webhookError.message}`);
+        await message.channel.send(`✅ Channel: <#${newChannel.id}>\n❌ Webhook failed`);
       }
     } catch (err) {
       console.error('CreateWeb Error:', err);
-      message.reply(`❌ Failed! Error: ${err.message}`);
+      message.reply(`❌ Failed! ${err.message}`);
     }
   }
 
   if (command === 'done') {
-    if (!message.channel.name.startsWith('ticket-')) return message.reply('❌ Only in ticket channels!');
+    if (!message.channel.name.startsWith('ticket-')) return message.reply('❌ Only in tickets!');
     const ticketOwnerName = message.channel.name.replace('ticket-', '');
     const ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-    if (!ticketOwner) return message.reply('❌ Ticket owner not found!');
+    if (!ticketOwner) return message.reply('❌ Owner not found!');
     const doneButton = new ButtonBuilder().setCustomId('owner_done_confirmation').setLabel('Yes, Mark as Done').setEmoji('✅').setStyle(ButtonStyle.Success);
     const cancelButton = new ButtonBuilder().setCustomId('owner_cancel_done').setLabel('Not Yet').setEmoji('❌').setStyle(ButtonStyle.Danger);
     const row = new ActionRowBuilder().addComponents(doneButton, cancelButton);
-    await message.channel.send({ content: `${ticketOwner.user}\n\n**Do you want to mark this ticket as done?**\nClick the button below to confirm.`, components: [row] });
+    await message.channel.send({ content: `${ticketOwner.user}\n\n**Mark this ticket as done?**\nClick below to confirm.`, components: [row] });
     await message.delete().catch(() => {});
   }
 
@@ -568,15 +599,15 @@ client.on('messageCreate', async (message) => {
     const lines = fullText.split('\n');
     const title = lines[0];
     const text = lines.slice(1).join('\n');
-    
+
     const embed = new EmbedBuilder()
       .setColor('#00FFFF')
       .setAuthor({ name: 'Support Ticket System', iconURL: message.guild.iconURL() })
       .setTitle(`🎫 ${title}`)
       .setDescription(text || 'Click the button below to create a support ticket')
-      .addFields({ name: '📋 What happens next?', value: 'Our team will assist you shortly after you create a ticket', inline: false })
+      .addFields({ name: '📋 What happens next?', value: 'Our team will assist you shortly', inline: false })
       .setThumbnail(message.guild.iconURL())
-      .setFooter({ text: 'Click the button below to get started' })
+      .setFooter({ text: 'Click below to get started' })
       .setTimestamp();
 
     const button = new ButtonBuilder()
@@ -613,26 +644,27 @@ client.on('messageCreate', async (message) => {
   if (command === 'help') {
     const helpEmbed = new EmbedBuilder()
       .setColor('#5865F2')
-      .setTitle('🎨 Message Designer Bot - Commands')
-      .setDescription('Transform your messages with cool embeds!')
+      .setTitle('🎨 Bot Commands')
+      .setDescription('Transform your messages!')
       .addFields(
-        { name: '!embed <message>', value: 'Creates a basic stylish embed', inline: false },
-        { name: '!auto <message>', value: '✨ Auto-adds emojis and fancy fonts', inline: false },
-        { name: '!fancy <message>', value: 'Creates a fancy gradient embed', inline: false },
-        { name: '!ticket <message>', value: '🎫 Creates a ticket panel', inline: false },
-        { name: '!shop', value: '🛒 Creates shop panel', inline: false },
-        { name: '!createweb <name>', value: '🔗 Creates private channel with webhook', inline: false },
-        { name: '!done', value: '✅ Mark ticket as done', inline: false },
+        { name: '!embed <msg>', value: 'Basic embed', inline: false },
+        { name: '!auto <msg>', value: '✨ Auto-style', inline: false },
+        { name: '!fancy <msg>', value: 'Fancy embed', inline: false },
+        { name: '!ticket <msg>', value: '🎫 Ticket panel', inline: false },
+        { name: '!shop', value: '🛒 Shop panel', inline: false },
+        { name: '!createweb <name>', value: '🔗 Webhook channel', inline: false },
+        { name: '!done', value: '✅ Mark done', inline: false },
         { name: '!concategory <id>', value: '⚙️ Set ticket category', inline: false },
         { name: '!conweb <id>', value: '⚙️ Set webhook category', inline: false },
-        { name: '!conorders <id>', value: '⚙️ Set orders log channel', inline: false },
-        { name: '!condone <id>', value: '⚙️ Set done log channel', inline: false },
-        { name: '!conshop <id>', value: '⚙️ Set shop ticket category', inline: false },
-        { name: '!admadm <user_id>', value: '👑 Add admin', inline: false },
-        { name: '!admrem <user_id>', value: '👑 Remove admin', inline: false },
-        { name: '!admlist', value: '👑 List all admins', inline: false }
+        { name: '!conorders <id>', value: '⚙️ Set orders log', inline: false },
+        { name: '!condone <id>', value: '⚙️ Set done log', inline: false },
+        { name: '!conshop <id>', value: '⚙️ Set shop category', inline: false },
+        { name: '!contrade <id>', value: '⚙️ Set trade log', inline: false },
+        { name: '!admadm <id>', value: '👑 Add admin', inline: false },
+        { name: '!admrem <id>', value: '👑 Remove admin', inline: false },
+        { name: '!admlist', value: '👑 List admins', inline: false }
       )
-      .setFooter({ text: 'Made with ❤️ by your team' })
+      .setFooter({ text: 'Made with ❤️' })
       .setTimestamp();
     message.reply({ embeds: [helpEmbed] });
   }
@@ -642,52 +674,113 @@ client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
     if (interaction.customId === 'shop_browse') {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      if (guildShops.size === 0) return interaction.reply({ content: '❌ No items yet!', ephemeral: true });
+      if (guildShops.size === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
       const selectOptions = [];
       let optionCount = 0;
       for (const [userId, items] of guildShops) {
         const user = await interaction.client.users.fetch(userId).catch(() => null);
         const userName = user ? user.username : 'Unknown';
         for (const item of items) {
-          if (optionCount < 25) {
-            selectOptions.push({ label: `${item.name} - ${item.price}`, description: `Seller: ${userName}`, value: `${userId}-${item.id}` });
+          if (optionCount < 25 && (item.stock || 0) > 0) {
+            selectOptions.push({ 
+              label: `${item.name} - ${item.price} (Stock: ${item.stock || 0})`, 
+              description: `Seller: ${userName}`, 
+              value: `${userId}-${item.id}` 
+            });
             optionCount++;
           }
         }
       }
-      const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_select_item').setPlaceholder('Select an item to buy').addOptions(selectOptions);
+      if (selectOptions.length === 0) {
+        return interaction.reply({ content: '❌ No items in stock!', ephemeral: true });
+      }
+      const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_select_item').setPlaceholder('Select an item').addOptions(selectOptions);
       const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ content: '🛒 Browse items:', components: [row], ephemeral: true });
+      interaction.reply({ content: '🛒 Browse:', components: [row], ephemeral: true });
     }
 
     if (interaction.customId === 'shop_manage') {
-      const manageModal = new ModalBuilder().setCustomId('shop_manage_modal').setTitle('Manage Your Shop');
-      const actionInput = new TextInputBuilder().setCustomId('shop_action').setLabel('Action (add/remove)').setPlaceholder('Type: add or remove').setStyle(TextInputStyle.Short).setRequired(true);
-      const itemNameInput = new TextInputBuilder().setCustomId('shop_item_name').setLabel('Item Name').setPlaceholder('e.g., Diamond Sword').setStyle(TextInputStyle.Short).setRequired(true);
-      const priceInput = new TextInputBuilder().setCustomId('shop_price').setLabel('Price').setPlaceholder('e.g., 100').setStyle(TextInputStyle.Short).setRequired(true);
-      const row1 = new ActionRowBuilder().addComponents(actionInput);
-      const row2 = new ActionRowBuilder().addComponents(itemNameInput);
+      const addButton = new ButtonBuilder().setCustomId('shop_add').setLabel('Add Item').setEmoji('➕').setStyle(ButtonStyle.Success);
+      const removeButton = new ButtonBuilder().setCustomId('shop_remove').setLabel('Remove Item').setEmoji('➖').setStyle(ButtonStyle.Danger);
+      const changeButton = new ButtonBuilder().setCustomId('shop_change').setLabel('Change Item').setEmoji('✏️').setStyle(ButtonStyle.Primary);
+      const row = new ActionRowBuilder().addComponents(addButton, removeButton, changeButton);
+      interaction.reply({ content: '🛒 **Manage Shop**\nChoose action:', components: [row], ephemeral: true });
+    }
+
+    if (interaction.customId === 'shop_add') {
+      const modal = new ModalBuilder().setCustomId('shop_add_modal').setTitle('Add Item');
+      const nameInput = new TextInputBuilder().setCustomId('item_name').setLabel('Item Name').setPlaceholder('e.g., Diamond Sword').setStyle(TextInputStyle.Short).setRequired(true);
+      const stockInput = new TextInputBuilder().setCustomId('item_stock').setLabel('Stock').setPlaceholder('e.g., 10').setStyle(TextInputStyle.Short).setRequired(true);
+      const priceInput = new TextInputBuilder().setCustomId('item_price').setLabel('Price').setPlaceholder('e.g., 100').setStyle(TextInputStyle.Short).setRequired(true);
+      const row1 = new ActionRowBuilder().addComponents(nameInput);
+      const row2 = new ActionRowBuilder().addComponents(stockInput);
       const row3 = new ActionRowBuilder().addComponents(priceInput);
-      manageModal.addComponents(row1, row2, row3);
-      await interaction.showModal(manageModal);
+      modal.addComponents(row1, row2, row3);
+      await interaction.showModal(modal);
+    }
+
+    if (interaction.customId === 'shop_remove') {
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      const userItems = guildShops.get(interaction.user.id) || [];
+      if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
+      const selectOptions = userItems.map(item => ({
+        label: `${item.name} (Stock: ${item.stock || 0})`,
+        description: `Price: ${item.price}`,
+        value: item.id
+      }));
+      const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_remove_select').setPlaceholder('Select item to remove').addOptions(selectOptions);
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+      interaction.reply({ content: '🗑️ Select item:', components: [row], ephemeral: true });
+    }
+
+    if (interaction.customId === 'shop_change') {
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      const userItems = guildShops.get(interaction.user.id) || [];
+      if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
+      const selectOptions = userItems.map(item => ({
+        label: `${item.name} (Stock: ${item.stock || 0})`,
+        description: `Price: ${item.price}`,
+        value: item.id
+      }));
+      const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_change_select').setPlaceholder('Select item to edit').addOptions(selectOptions);
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+      interaction.reply({ content: '✏️ Select item:', components: [row], ephemeral: true });
     }
 
     if (interaction.customId === 'create_ticket') {
       const categoryId = ticketCategories.get(interaction.guild.id);
-      if (!categoryId) return interaction.reply({ content: '❌ Ticket category not set!', ephemeral: true });
+      if (!categoryId) return interaction.reply({ content: '❌ Category not set!', ephemeral: true });
       const category = interaction.guild.channels.cache.get(categoryId);
       if (!category) return interaction.reply({ content: '❌ Category not found!', ephemeral: true });
       const existingTicket = interaction.guild.channels.cache.find(ch => ch.name === `ticket-${interaction.user.username.toLowerCase()}` && ch.parentId === categoryId);
-      if (existingTicket) return interaction.reply({ content: `❌ You already have a ticket: <#${existingTicket.id}>`, ephemeral: true });
-      const modal = new ModalBuilder().setCustomId('ticket_modal').setTitle('Create Support Ticket');
-      const serviceInput = new TextInputBuilder().setCustomId('service_type').setLabel('What Service You Will Avail?').setPlaceholder('Describe Your Service You Want').setStyle(TextInputStyle.Paragraph).setRequired(true);
+      if (existingTicket) return interaction.reply({ content: `❌ You have a ticket: <#${existingTicket.id}>`, ephemeral: true });
+      const modal = new ModalBuilder().setCustomId('ticket_modal').setTitle('Create Ticket');
+      const serviceInput = new TextInputBuilder().setCustomId('service_type').setLabel('What Service You Will Avail?').setPlaceholder('Describe your service').setStyle(TextInputStyle.Paragraph).setRequired(true);
       const actionRow = new ActionRowBuilder().addComponents(serviceInput);
       modal.addComponents(actionRow);
       await interaction.showModal(modal);
     }
 
+    if (interaction.customId.startsWith('shop_confirm_remove_')) {
+      const itemId = interaction.customId.replace('shop_confirm_remove_', '');
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      let userItems = guildShops.get(interaction.user.id) || [];
+      const itemIndex = userItems.findIndex(i => i.id === itemId);
+      if (itemIndex === -1) return interaction.update({ content: '❌ Not found!', components: [] });
+      const itemName = userItems[itemIndex].name;
+      userItems.splice(itemIndex, 1);
+      guildShops.set(interaction.user.id, userItems);
+      shopListings.set(interaction.guild.id, guildShops);
+      await saveData();
+      interaction.update({ content: `✅ Removed **${itemName}**!`, components: [] });
+    }
+
+    if (interaction.customId === 'shop_cancel_remove') {
+      interaction.update({ content: '❌ Cancelled.', components: [] });
+    }
+
     if (interaction.customId === 'close_ticket') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket channel!', ephemeral: true });
+      if (!interaction.channel.name.startsWith('ticket-') && !interaction.channel.name.startsWith('shop-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
       await interaction.reply('🔒 Closing in 5 seconds...');
       setTimeout(async () => {
         const ticketId = interaction.channel.id;
@@ -696,61 +789,56 @@ client.on('interactionCreate', async (interaction) => {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) await channelToDelete.delete().catch(console.error);
         }
-        // Remove ticket data from MongoDB
         ticketChannels.delete(ticketId);
         ticketOwners.delete(ticketId);
         await saveData();
-        console.log(`🗑️ Cleaned up ticket ${ticketId} from database`);
         await interaction.channel.delete().catch(console.error);
       }, 5000);
     }
 
     if (interaction.customId === 'done_ticket') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket channel!', ephemeral: true });
+      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-      if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only ticket creator can mark as done!', ephemeral: true });
+      if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only ticket creator!', ephemeral: true });
       const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
       const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
       const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
-      await interaction.reply({ content: `⏳ **${interaction.user}** marked this ticket as done!\n\n**Admins/Staff:** Please confirm if the service was completed.`, components: [confirmRow] });
+      await interaction.reply({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
     }
 
     if (interaction.customId === 'owner_done_confirmation') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket channel!', ephemeral: true });
+      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-      if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only ticket creator!', ephemeral: true });
+      if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only creator!', ephemeral: true });
       const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
       const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
       const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
-      await interaction.update({ content: `⏳ **${interaction.user}** marked this ticket as done!\n\n**Admins/Staff:** Please confirm if the service was completed.`, components: [confirmRow] });
+      await interaction.update({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
     }
 
     if (interaction.customId === 'owner_cancel_done') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket channel!', ephemeral: true });
-      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
-      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-      if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only ticket creator!', ephemeral: true });
-      await interaction.update({ content: `❌ **${interaction.user}** cancelled the done request.\n\nTicket will remain open.`, components: [] });
+      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
+      await interaction.update({ content: `❌ **${interaction.user}** cancelled.\n\nTicket remains open.`, components: [] });
     }
 
     if (interaction.customId === 'confirm_done') {
       const isOwner = interaction.user.id === OWNER_ID;
       const admins = adminUsers.get(interaction.guild.id) || [];
       const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins can confirm!', ephemeral: true });
+      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
       let serviceDescription = 'N/A';
       try {
         const messages = await interaction.channel.messages.fetch({ limit: 10 });
         const firstMessage = messages.reverse().find(m => m.content.includes('Service Request:'));
-        if (firstMessage && firstMessage.content.includes('Service Request:')) {
+        if (firstMessage) {
           serviceDescription = firstMessage.content.split('Service Request:')[1].trim();
         }
       } catch (err) {
-        console.error('Error fetching messages:', err);
+        console.error(err);
       }
       const doneChannelId = doneChannels.get(interaction.guild.id);
       if (doneChannelId) {
@@ -760,15 +848,14 @@ client.on('interactionCreate', async (interaction) => {
           const doneEmbed = new EmbedBuilder()
             .setColor('#00FF7F')
             .setAuthor({ name: '✅ Service Completed', iconURL: interaction.guild.iconURL() })
-            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!`)
-            .setDescription(`🎉 **Service successfully delivered and confirmed!**\n\n📦 **Service Details:**\n${serviceDescription}`)
+            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received service!`)
+            .setDescription(`🎉 **Successfully delivered!**\n\n📦 **Details:**\n${serviceDescription}`)
             .addFields(
               { name: '👤 Customer', value: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, inline: true },
-              { name: '✅ Confirmed By', value: `${interaction.user}`, inline: true },
-              { name: '⏰ Completed At', value: `<t:${currentTimestamp}:F>\n(<t:${currentTimestamp}:R>)`, inline: false }
+              { name: '✅ By', value: `${interaction.user}`, inline: true },
+              { name: '⏰ Completed', value: `<t:${currentTimestamp}:F>`, inline: false }
             )
-            .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ dynamic: true, size: 256 }) : null)
-            .setImage(interaction.user.displayAvatarURL({ dynamic: true, size: 512 }))
+            .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ size: 256 }) : null)
             .setFooter({ text: `Admin: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
             .setTimestamp();
           const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
@@ -776,7 +863,7 @@ client.on('interactionCreate', async (interaction) => {
           await sentMessage.react('🎉');
         }
       }
-      await interaction.update({ content: `✅ **Service confirmed as completed by ${interaction.user}!**\n\nClosing ticket in 5 seconds...`, components: [] });
+      await interaction.update({ content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, components: [] });
       setTimeout(async () => {
         const ticketId = interaction.channel.id;
         const createdChannels = ticketChannels.get(ticketId) || [];
@@ -784,11 +871,9 @@ client.on('interactionCreate', async (interaction) => {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
           if (channelToDelete) await channelToDelete.delete().catch(console.error);
         }
-        // Remove ticket data from MongoDB
         ticketChannels.delete(ticketId);
         ticketOwners.delete(ticketId);
         await saveData();
-        console.log(`🗑️ Cleaned up completed ticket ${ticketId} from database`);
         await interaction.channel.delete().catch(console.error);
       }, 5000);
     }
@@ -797,8 +882,39 @@ client.on('interactionCreate', async (interaction) => {
       const isOwner = interaction.user.id === OWNER_ID;
       const admins = adminUsers.get(interaction.guild.id) || [];
       const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins can deny!', ephemeral: true });
-      await interaction.update({ content: `❌ **Request denied by ${interaction.user}.**\n\nThe service is not yet complete. Please continue working on it.`, components: [] });
+      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+      await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
+    }
+
+    if (interaction.customId.startsWith('shop_trade_done_')) {
+      const parts = interaction.customId.replace('shop_trade_done_', '').split('_');
+      const sellerId = parts[0];
+      const itemId = parts[1];
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      const sellerItems = guildShops.get(sellerId) || [];
+      const item = sellerItems.find(i => i.id === itemId);
+      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
+      item.stock = Math.max(0, (item.stock || 0) - 1);
+      guildShops.set(sellerId, sellerItems);
+      shopListings.set(interaction.guild.id, guildShops);
+      await saveData();
+      const tradeChannelId = tradeChannels.get(interaction.guild.id);
+      if (tradeChannelId) {
+        const tradeChannel = interaction.guild.channels.cache.get(tradeChannelId);
+        if (tradeChannel) {
+          const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
+          const tradeEmbed = new EmbedBuilder()
+            .setColor('#00FF7F')
+            .setTitle('✅ Trade Completed')
+            .setDescription(`**Item:** ${item.name}\n**Price:** ${item.price}\n**Seller:** ${seller ? seller : `<@${sellerId}>`}\n**Buyer:** ${interaction.user}\n\n**Remaining Stock:** ${item.stock}`)
+            .setTimestamp();
+          await tradeChannel.send({ embeds: [tradeEmbed] });
+        }
+      }
+      await interaction.update({ content: `✅ Trade done! Stock: **${item.stock}**. Closing in 5 seconds...`, components: [] });
+      setTimeout(async () => {
+        await interaction.channel.delete().catch(console.error);
+      }, 5000);
     }
   }
 
@@ -822,14 +938,11 @@ client.on('interactionCreate', async (interaction) => {
           await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         }
         const doneButton = new ButtonBuilder().setCustomId('done_ticket').setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
+        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
-        await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket Created by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
-        
-        // Save ticket owner
+        await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
         ticketOwners.set(ticketChannel.id, interaction.user.id);
         saveData();
-        
         const orderChannelId = orderChannels.get(interaction.guild.id);
         if (orderChannelId) {
           const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
@@ -837,15 +950,14 @@ client.on('interactionCreate', async (interaction) => {
             const orderTimestamp = Math.floor(Date.now() / 1000);
             const orderEmbed = new EmbedBuilder()
               .setColor('#FF6B35')
-              .setAuthor({ name: '📦 New Order Received!', iconURL: interaction.guild.iconURL() })
+              .setAuthor({ name: '📦 New Order!', iconURL: interaction.guild.iconURL() })
               .setTitle(`Order from ${interaction.user.tag}`)
-              .setDescription(`🎉 **A new order has been placed!**\n\n📋 **Service Details:**\n${serviceDescription}`)
+              .setDescription(`🎉 **New order placed!**\n\n📋 **Details:**\n${serviceDescription}`)
               .addFields(
                 { name: '👤 Customer', value: `${interaction.user}`, inline: true },
-                { name: '⏰ Ordered At', value: `<t:${orderTimestamp}:F>\n(<t:${orderTimestamp}:R>)`, inline: false }
+                { name: '⏰ Ordered', value: `<t:${orderTimestamp}:F>`, inline: false }
               )
-              .setThumbnail(interaction.user.displayAvatarURL({ dynamic: true, size: 256 }))
-              .setFooter({ text: 'Order Management System' })
+              .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
               .setTimestamp();
             await orderChannel.send({ embeds: [orderEmbed] });
           }
@@ -857,49 +969,82 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
-    if (interaction.customId === 'shop_manage_modal') {
-      const action = interaction.fields.getTextInputValue('shop_action').toLowerCase();
-      const itemName = interaction.fields.getTextInputValue('shop_item_name');
-      const price = interaction.fields.getTextInputValue('shop_price');
+    if (interaction.customId === 'shop_add_modal') {
+      const itemName = interaction.fields.getTextInputValue('item_name');
+      const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
+      const itemPrice = interaction.fields.getTextInputValue('item_price');
+      if (isNaN(itemStock) || itemStock < 0) return interaction.reply({ content: '❌ Invalid stock!', ephemeral: true });
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       let userItems = guildShops.get(interaction.user.id) || [];
-      if (action === 'add') {
-        const itemId = `${Date.now()}`;
-        userItems.push({ id: itemId, name: itemName, price: price, seller: interaction.user.tag });
-        guildShops.set(interaction.user.id, userItems);
-        shopListings.set(interaction.guild.id, guildShops);
-        saveData();
-        interaction.reply({ content: `✅ Added **${itemName}** for **${price}** to your shop!`, ephemeral: true });
-      } else if (action === 'remove') {
-        const itemIndex = userItems.findIndex(item => item.name.toLowerCase() === itemName.toLowerCase());
-        if (itemIndex === -1) return interaction.reply({ content: `❌ Item **${itemName}** not found!`, ephemeral: true });
-        userItems.splice(itemIndex, 1);
-        guildShops.set(interaction.user.id, userItems);
-        shopListings.set(interaction.guild.id, guildShops);
-        await saveData();
-        console.log(`🗑️ Removed item ${itemName} from shop in database`);
-        interaction.reply({ content: `✅ Removed **${itemName}** from your shop!`, ephemeral: true });
-      } else {
-        interaction.reply({ content: '❌ Invalid action! Use "add" or "remove".', ephemeral: true });
-      }
+      const itemId = `${Date.now()}`;
+      userItems.push({ id: itemId, name: itemName, price: itemPrice, stock: itemStock, seller: interaction.user.tag });
+      guildShops.set(interaction.user.id, userItems);
+      shopListings.set(interaction.guild.id, guildShops);
+      await saveData();
+      interaction.reply({ content: `✅ Added **${itemName}** for **${itemPrice}** with **${itemStock}** stock!`, ephemeral: true });
+    }
+
+    if (interaction.customId.startsWith('shop_change_modal_')) {
+      const itemId = interaction.customId.replace('shop_change_modal_', '');
+      const itemName = interaction.fields.getTextInputValue('item_name');
+      const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
+      const itemPrice = interaction.fields.getTextInputValue('item_price');
+      if (isNaN(itemStock) || itemStock < 0) return interaction.reply({ content: '❌ Invalid stock!', ephemeral: true });
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      let userItems = guildShops.get(interaction.user.id) || [];
+      const itemIndex = userItems.findIndex(i => i.id === itemId);
+      if (itemIndex === -1) return interaction.reply({ content: '❌ Not found!', ephemeral: true });
+      userItems[itemIndex].name = itemName;
+      userItems[itemIndex].price = itemPrice;
+      userItems[itemIndex].stock = itemStock;
+      guildShops.set(interaction.user.id, userItems);
+      shopListings.set(interaction.guild.id, guildShops);
+      await saveData();
+      interaction.reply({ content: `✅ Updated **${itemName}** - Price: **${itemPrice}**, Stock: **${itemStock}**`, ephemeral: true });
     }
   }
 
   if (interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'shop_remove_select') {
+      const itemId = interaction.values[0];
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      let userItems = guildShops.get(interaction.user.id) || [];
+      const item = userItems.find(i => i.id === itemId);
+      if (!item) return interaction.reply({ content: '❌ Not found!', ephemeral: true });
+      const confirmButton = new ButtonBuilder().setCustomId(`shop_confirm_remove_${itemId}`).setLabel('Confirm').setStyle(ButtonStyle.Danger);
+      const cancelButton = new ButtonBuilder().setCustomId('shop_cancel_remove').setLabel('Cancel').setStyle(ButtonStyle.Secondary);
+      const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+      interaction.update({ content: `⚠️ Remove **${item.name}**?`, components: [row] });
+    }
+
+    if (interaction.customId === 'shop_change_select') {
+      const itemId = interaction.values[0];
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+      const userItems = guildShops.get(interaction.user.id) || [];
+      const item = userItems.find(i => i.id === itemId);
+      if (!item) return interaction.reply({ content: '❌ Not found!', ephemeral: true });
+      const modal = new ModalBuilder().setCustomId(`shop_change_modal_${itemId}`).setTitle('Edit Item');
+      const nameInput = new TextInputBuilder().setCustomId('item_name').setLabel('Item Name').setValue(item.name).setStyle(TextInputStyle.Short).setRequired(true);
+      const stockInput = new TextInputBuilder().setCustomId('item_stock').setLabel('Stock').setValue(String(item.stock || 0)).setStyle(TextInputStyle.Short).setRequired(true);
+      const priceInput = new TextInputBuilder().setCustomId('item_price').setLabel('Price').setValue(item.price).setStyle(TextInputStyle.Short).setRequired(true);
+      const row1 = new ActionRowBuilder().addComponents(nameInput);
+      const row2 = new ActionRowBuilder().addComponents(stockInput);
+      const row3 = new ActionRowBuilder().addComponents(priceInput);
+      modal.addComponents(row1, row2, row3);
+      await interaction.showModal(modal);
+    }
+
     if (interaction.customId === 'shop_select_item') {
       const [sellerId, itemId] = interaction.values[0].split('-');
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const sellerItems = guildShops.get(sellerId) || [];
       const item = sellerItems.find(i => i.id === itemId);
       if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-      
+      if ((item.stock || 0) <= 0) return interaction.reply({ content: '❌ Out of stock!', ephemeral: true });
       const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
       const buyer = interaction.user;
-
-      // Create ticket between buyer and seller
       const categoryId = shopCategories.get(interaction.guild.id) || ticketCategories.get(interaction.guild.id);
-      if (!categoryId) return interaction.reply({ content: '❌ Shop ticket category not set! Ask admin to use !conshop', ephemeral: true });
-
+      if (!categoryId) return interaction.reply({ content: '❌ Shop category not set! Ask admin to use !conshop', ephemeral: true });
       try {
         const ticketChannel = await interaction.guild.channels.create({
           name: `shop-${buyer.username}-${seller ? seller.username : 'seller'}`,
@@ -912,33 +1057,24 @@ client.on('interactionCreate', async (interaction) => {
             { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
           ],
         });
-
-        // Add staff role permissions
         const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
         if (staffRole) {
           await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         }
-
-        // Add owner permissions
         await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-
-        // Add admin permissions
         const admins = adminUsers.get(interaction.guild.id) || [];
         for (const adminId of admins) {
           await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         }
-
-        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close Ticket').setEmoji('🔒').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder().addComponents(closeButton);
-
+        const doneButton = new ButtonBuilder().setCustomId(`shop_trade_done_${sellerId}_${itemId}`).setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
+        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
+        const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
         const itemEmbed = new EmbedBuilder()
           .setColor('#FFD700')
           .setTitle('🛍️ Shop Transaction')
-          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n**Item:** ${item.name}\n**Price:** ${item.price}`)
+          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n**Item:** ${item.name}\n**Price:** ${item.price}\n**Stock:** ${item.stock}`)
           .setTimestamp();
-
         await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
-
         interaction.reply({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, ephemeral: true });
       } catch (err) {
         console.error('Shop Ticket Error:', err);
