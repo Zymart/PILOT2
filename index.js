@@ -20,6 +20,8 @@ const OWNER_ID = '730629579533844512';
 const JSONBIN_API_KEY = process.env.JSONBIN_API_KEY || '';
 const JSONBIN_BIN_ID = process.env.JSONBIN_BIN_ID || '';
 
+// ==================== DATA STORAGE ====================
+
 async function loadData() {
   if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID) {
     console.log('⚠️ JSONBin not configured, using empty data');
@@ -80,7 +82,8 @@ async function saveData() {
     ticketOwners: Object.fromEntries(ticketOwners),
     shopCategories: Object.fromEntries(shopCategories),
     transcriptChannels: Object.fromEntries(transcriptChannels),
-    tradeChannels: Object.fromEntries(tradeChannels)
+    tradeChannels: Object.fromEntries(tradeChannels),
+    shopNews: Object.fromEntries(shopNews)
   };
 
   return new Promise((resolve) => {
@@ -131,7 +134,8 @@ function parseData(data) {
     ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
     shopCategories: new Map(Object.entries(data.shopCategories || {})),
     transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
-    tradeChannels: new Map(Object.entries(data.tradeChannels || {}))
+    tradeChannels: new Map(Object.entries(data.tradeChannels || {})),
+    shopNews: new Map(Object.entries(data.shopNews || {}))
   };
 }
 
@@ -147,10 +151,12 @@ function getEmptyData() {
     ticketOwners: new Map(),
     shopCategories: new Map(),
     transcriptChannels: new Map(),
-    tradeChannels: new Map()
+    tradeChannels: new Map(),
+    shopNews: new Map()
   };
 }
 
+// Global data maps
 let ticketCategories = new Map();
 let orderChannels = new Map();
 let doneChannels = new Map();
@@ -162,6 +168,9 @@ let ticketOwners = new Map();
 let shopCategories = new Map();
 let transcriptChannels = new Map();
 let tradeChannels = new Map();
+let shopNews = new Map();
+
+// ==================== BOT READY ====================
 
 client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
@@ -177,6 +186,7 @@ client.once('ready', async () => {
   shopCategories = loadedData.shopCategories;
   transcriptChannels = loadedData.transcriptChannels;
   tradeChannels = loadedData.tradeChannels;
+  shopNews = loadedData.shopNews || new Map();
   console.log('✅ Data loaded from cloud storage');
 
   setInterval(async () => {
@@ -225,6 +235,8 @@ async function cleanupOrphanedData() {
   }
 }
 
+// ==================== MESSAGE COMMANDS ====================
+
 client.on('messageCreate', async (message) => {
   if (message.author.bot) return;
   if (!message.content.startsWith(PREFIX)) return;
@@ -236,6 +248,8 @@ client.on('messageCreate', async (message) => {
   const admins = adminUsers.get(message.guild.id) || [];
   const isAdmin = admins.includes(message.author.id);
   const canUseCommands = isOwner || isAdmin;
+
+  // ========== ADMIN MANAGEMENT ==========
 
   if (command === 'admadm') {
     if (!isOwner) return message.reply('❌ Only the owner can use this command!');
@@ -276,6 +290,7 @@ client.on('messageCreate', async (message) => {
     message.reply(adminList);
   }
 
+  // Permission check for other commands
   if (!canUseCommands && command !== 'admadm' && command !== 'admrem' && command !== 'admlist') {
     const hasModerator = message.member.roles.cache.some(r => 
       r.name.toLowerCase().includes('moderator') || 
@@ -284,6 +299,8 @@ client.on('messageCreate', async (message) => {
     );
     if (!hasModerator) return message.reply('❌ You don\'t have permission!');
   }
+
+  // ========== EMBED COMMANDS ==========
 
   if (command === 'embed') {
     const text = args.join(' ');
@@ -459,6 +476,8 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // ========== CONFIGURATION COMMANDS ==========
+
   if (command === 'concategory') {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
     const categoryId = args[0];
@@ -536,6 +555,89 @@ client.on('messageCreate', async (message) => {
     message.reply(`✅ Transcript log set to: <#${channelId}>`);
   }
 
+  // ========== SHOP NEWS COMMAND ==========
+
+  if (command === 'connews') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!');
+    const channelId = args[0];
+    if (!channelId) return message.reply('Usage: `!connews CHANNEL_ID`');
+    const channel = message.guild.channels.cache.get(channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    shopNews.set(message.guild.id, channelId);
+    saveData();
+    message.reply(`✅ Shop news channel set to: <#${channelId}>`);
+  }
+
+  // ========== STOCK MANAGEMENT COMMAND ==========
+
+  if (command === 'stock') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!');
+
+    const action = args[0]; // + or -
+    const amount = parseInt(args[1]);
+    const userId = args[2];
+    const itemName = args.slice(3).join(' ');
+
+    if (!action || !amount || !userId || !itemName) {
+      return message.reply('Usage: `!stock +/- AMOUNT USER_ID ITEM_NAME`\nExample: `!stock + 10 123456789 Diamond Sword`');
+    }
+
+    if (action !== '+' && action !== '-') {
+      return message.reply('❌ Action must be `+` or `-`');
+    }
+
+    if (isNaN(amount) || amount <= 0) {
+      return message.reply('❌ Amount must be a positive number!');
+    }
+
+    const guildShops = shopListings.get(message.guild.id) || new Map();
+    let userItems = guildShops.get(userId) || [];
+
+    const item = userItems.find(i => i.name.toLowerCase() === itemName.toLowerCase());
+
+    if (!item) {
+      return message.reply(`❌ Item **${itemName}** not found for user <@${userId}>!`);
+    }
+
+    const oldStock = item.stock || 0;
+
+    if (action === '+') {
+      item.stock = oldStock + amount;
+    } else {
+      item.stock = Math.max(0, oldStock - amount);
+    }
+
+    guildShops.set(userId, userItems);
+    shopListings.set(message.guild.id, guildShops);
+    await saveData();
+
+    const stockEmbed = new EmbedBuilder()
+      .setColor(action === '+' ? '#00FF00' : '#FF6B35')
+      .setTitle(`${action === '+' ? '📈' : '📉'} Stock Updated`)
+      .setDescription(`**Item:** ${item.name}\n**User:** <@${userId}>\n\n**Previous Stock:** ${oldStock}\n**Change:** ${action}${amount}\n**New Stock:** ${item.stock}`)
+      .setTimestamp()
+      .setFooter({ text: `Updated by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+
+    message.reply({ embeds: [stockEmbed] });
+
+    // Send to shop news channel if configured
+    const newsChannelId = shopNews.get(message.guild.id);
+    if (newsChannelId) {
+      const newsChannel = message.guild.channels.cache.get(newsChannelId);
+      if (newsChannel) {
+        const newsEmbed = new EmbedBuilder()
+          .setColor(action === '+' ? '#00FF00' : '#FFA500')
+          .setTitle(`${action === '+' ? '🆕 New Stock Added!' : '⚠️ Stock Updated'}`)
+          .setDescription(`**${item.name}** by <@${userId}>\n\n${action === '+' ? '✨ Fresh stock available!' : '📊 Stock adjusted'}\n**Current Stock:** ${item.stock}\n**Price:** ${item.price}`)
+          .setTimestamp();
+
+        await newsChannel.send({ embeds: [newsEmbed] });
+      }
+    }
+  }
+
+  // ========== WEBHOOK CHANNEL CREATION ==========
+
   if (command === 'createweb') {
     const channelName = args.join('-').toLowerCase();
     if (!channelName) return message.reply('Usage: `!createweb name`');
@@ -581,6 +683,8 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // ========== DONE COMMAND ==========
+
   if (command === 'done') {
     if (!message.channel.name.startsWith('ticket-')) return message.reply('❌ Only in tickets!');
     const ticketOwnerName = message.channel.name.replace('ticket-', '');
@@ -592,6 +696,8 @@ client.on('messageCreate', async (message) => {
     await message.channel.send({ content: `${ticketOwner.user}\n\n**Mark this ticket as done?**\nClick below to confirm.`, components: [row] });
     await message.delete().catch(() => {});
   }
+
+  // ========== TICKET PANEL ==========
 
   if (command === 'ticket') {
     const fullText = args.join(' ');
@@ -627,6 +733,8 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // ========== SHOP PANEL ==========
+
   if (command === 'shop') {
     const embed = new EmbedBuilder().setColor('#FFD700').setTitle('🛒 Shop').setDescription('Welcome to the shop! Click below to browse items or manage your shop.').setTimestamp().setFooter({ text: 'Shop System' });
     const shopButton = new ButtonBuilder().setCustomId('shop_browse').setLabel('Shop').setEmoji('🛍️').setStyle(ButtonStyle.Primary);
@@ -641,37 +749,34 @@ client.on('messageCreate', async (message) => {
     }
   }
 
+  // ========== HELP COMMAND ==========
+
   if (command === 'help') {
     const helpEmbed = new EmbedBuilder()
       .setColor('#5865F2')
-      .setTitle('🎨 Bot Commands')
-      .setDescription('Transform your messages!')
+      .setTitle('🎨 Bot Commands - Complete Guide')
+      .setDescription('**All available commands and features**')
       .addFields(
-        { name: '!embed <msg>', value: 'Basic embed', inline: false },
-        { name: '!auto <msg>', value: '✨ Auto-style', inline: false },
-        { name: '!fancy <msg>', value: 'Fancy embed', inline: false },
-        { name: '!ticket <msg>', value: '🎫 Ticket panel', inline: false },
-        { name: '!shop', value: '🛒 Shop panel', inline: false },
-        { name: '!createweb <name>', value: '🔗 Webhook channel', inline: false },
-        { name: '!done', value: '✅ Mark done', inline: false },
-        { name: '!concategory <id>', value: '⚙️ Set ticket category', inline: false },
-        { name: '!conweb <id>', value: '⚙️ Set webhook category', inline: false },
-        { name: '!conorders <id>', value: '⚙️ Set orders log', inline: false },
-        { name: '!condone <id>', value: '⚙️ Set done log', inline: false },
-        { name: '!conshop <id>', value: '⚙️ Set shop category', inline: false },
-        { name: '!contrade <id>', value: '⚙️ Set trade log', inline: false },
-        { name: '!admadm <id>', value: '👑 Add admin', inline: false },
-        { name: '!admrem <id>', value: '👑 Remove admin', inline: false },
-        { name: '!admlist', value: '👑 List admins', inline: false }
+        { name: '📝 Embed Commands', value: '`!embed <msg>` - Basic embed\n`!auto <msg>` - Auto-styled embed\n`!fancy <title>\\n<msg>` - Fancy embed\n`!announce <msg>` - Announcement\n`!quote <msg>` - Quote style\n`!colorembed #HEX <msg>` - Custom color\n`!success <msg>` - Success message\n`!error <msg>` - Error message\n`!info <msg>` - Info message', inline: false },
+        { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Mark ticket as done\n`!createweb <name>` - Create webhook channel', inline: false },
+        { name: '🛒 Shop System', value: '`!shop` - Create shop panel\n`!stock +/- <amount> <user_id> <item>` - Manage stock\nExample: `!stock + 10 123456 Sword`', inline: false },
+        { name: '⚙️ Configuration (Admin Only)', value: '`!concategory <id>` - Set ticket category\n`!conweb <id>` - Set webhook category\n`!conorders <id>` - Set orders log\n`!condone <id>` - Set done log\n`!conshop <id>` - Set shop category\n`!contrade <id>` - Set trade log\n`!contranscript <id>` - Set transcript log\n`!connews <id>` - Set shop news channel', inline: false },
+        { name: '👑 Admin Management (Owner Only)', value: '`!admadm <user_id>` - Add admin\n`!admrem <user_id>` - Remove admin\n`!admlist` - List all admins', inline: false },
+        { name: '✨ Features', value: '✅ Anti-duplicate tickets\n✅ 3-step shop verification\n✅ Stock management\n✅ Auto shop news\n✅ Trade logging\n✅ Webhook integration\n✅ Permission system', inline: false }
       )
-      .setFooter({ text: 'Made with ❤️' })
+      .setFooter({ text: 'Made with ❤️ | All features fully functional' })
       .setTimestamp();
     message.reply({ embeds: [helpEmbed] });
   }
 });
 
+// ==================== BUTTON INTERACTIONS ====================
+
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
+
+    // ========== SHOP BROWSE ==========
+
     if (interaction.customId === 'shop_browse') {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       if (guildShops.size === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
@@ -699,6 +804,8 @@ client.on('interactionCreate', async (interaction) => {
       interaction.reply({ content: '🛒 Browse:', components: [row], ephemeral: true });
     }
 
+    // ========== SHOP MANAGE ==========
+
     if (interaction.customId === 'shop_manage') {
       const addButton = new ButtonBuilder().setCustomId('shop_add').setLabel('Add Item').setEmoji('➕').setStyle(ButtonStyle.Success);
       const removeButton = new ButtonBuilder().setCustomId('shop_remove').setLabel('Remove Item').setEmoji('➖').setStyle(ButtonStyle.Danger);
@@ -706,6 +813,8 @@ client.on('interactionCreate', async (interaction) => {
       const row = new ActionRowBuilder().addComponents(addButton, removeButton, changeButton);
       interaction.reply({ content: '🛒 **Manage Shop**\nChoose action:', components: [row], ephemeral: true });
     }
+
+    // ========== SHOP ADD ==========
 
     if (interaction.customId === 'shop_add') {
       const modal = new ModalBuilder().setCustomId('shop_add_modal').setTitle('Add Item');
@@ -718,6 +827,8 @@ client.on('interactionCreate', async (interaction) => {
       modal.addComponents(row1, row2, row3);
       await interaction.showModal(modal);
     }
+
+    // ========== SHOP REMOVE ==========
 
     if (interaction.customId === 'shop_remove') {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
@@ -733,6 +844,8 @@ client.on('interactionCreate', async (interaction) => {
       interaction.reply({ content: '🗑️ Select item:', components: [row], ephemeral: true });
     }
 
+    // ========== SHOP CHANGE ==========
+
     if (interaction.customId === 'shop_change') {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const userItems = guildShops.get(interaction.user.id) || [];
@@ -746,6 +859,8 @@ client.on('interactionCreate', async (interaction) => {
       const row = new ActionRowBuilder().addComponents(selectMenu);
       interaction.reply({ content: '✏️ Select item:', components: [row], ephemeral: true });
     }
+
+    // ========== CREATE TICKET ==========
 
     if (interaction.customId === 'create_ticket') {
       const categoryId = ticketCategories.get(interaction.guild.id);
@@ -761,6 +876,8 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.showModal(modal);
     }
 
+    // ========== SHOP CONFIRM REMOVE ==========
+
     if (interaction.customId.startsWith('shop_confirm_remove_')) {
       const itemId = interaction.customId.replace('shop_confirm_remove_', '');
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
@@ -775,9 +892,13 @@ client.on('interactionCreate', async (interaction) => {
       interaction.update({ content: `✅ Removed **${itemName}**!`, components: [] });
     }
 
+    // ========== SHOP CANCEL REMOVE ==========
+
     if (interaction.customId === 'shop_cancel_remove') {
       interaction.update({ content: '❌ Cancelled.', components: [] });
     }
+
+    // ========== CLOSE TICKET ==========
 
     if (interaction.customId === 'close_ticket') {
       if (!interaction.channel.name.startsWith('ticket-') && !interaction.channel.name.startsWith('shop-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
@@ -796,6 +917,8 @@ client.on('interactionCreate', async (interaction) => {
       }, 5000);
     }
 
+    // ========== DONE TICKET ==========
+
     if (interaction.customId === 'done_ticket') {
       if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
@@ -806,6 +929,8 @@ client.on('interactionCreate', async (interaction) => {
       const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
       await interaction.reply({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
     }
+
+    // ========== OWNER DONE CONFIRMATION ==========
 
     if (interaction.customId === 'owner_done_confirmation') {
       if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
@@ -818,10 +943,14 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.update({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
     }
 
+    // ========== OWNER CANCEL DONE ==========
+
     if (interaction.customId === 'owner_cancel_done') {
       if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
       await interaction.update({ content: `❌ **${interaction.user}** cancelled.\n\nTicket remains open.`, components: [] });
     }
+
+    // ========== CONFIRM DONE ==========
 
     if (interaction.customId === 'confirm_done') {
       const isOwner = interaction.user.id === OWNER_ID;
@@ -837,7 +966,6 @@ client.on('interactionCreate', async (interaction) => {
         const messages = await interaction.channel.messages.fetch({ limit: 50 });
         const messagesArray = Array.from(messages.values()).reverse();
 
-        // Find the message with Service Request
         for (const msg of messagesArray) {
           if (msg.content && msg.content.includes('Service Request:')) {
             const parts = msg.content.split('Service Request:');
@@ -900,6 +1028,8 @@ client.on('interactionCreate', async (interaction) => {
       }, 5000);
     }
 
+    // ========== DENY DONE ==========
+
     if (interaction.customId === 'deny_done') {
       const isOwner = interaction.user.id === OWNER_ID;
       const admins = adminUsers.get(interaction.guild.id) || [];
@@ -907,6 +1037,8 @@ client.on('interactionCreate', async (interaction) => {
       if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
       await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
     }
+
+    // ========== SHOP TRADE DONE ==========
 
     if (interaction.customId.startsWith('shop_trade_done_')) {
       const parts = interaction.customId.replace('shop_trade_done_', '').split('_');
@@ -940,7 +1072,12 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
+  // ==================== MODAL SUBMISSIONS ====================
+
   if (interaction.isModalSubmit()) {
+
+    // ========== TICKET MODAL ==========
+
     if (interaction.customId === 'ticket_modal') {
       const serviceDescription = interaction.fields.getTextInputValue('service_type');
       const categoryId = ticketCategories.get(interaction.guild.id);
@@ -991,6 +1128,8 @@ client.on('interactionCreate', async (interaction) => {
       }
     }
 
+    // ========== SHOP ADD MODAL ==========
+
     if (interaction.customId === 'shop_add_modal') {
       const itemName = interaction.fields.getTextInputValue('item_name');
       const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
@@ -1003,8 +1142,33 @@ client.on('interactionCreate', async (interaction) => {
       guildShops.set(interaction.user.id, userItems);
       shopListings.set(interaction.guild.id, guildShops);
       await saveData();
+
+      // Send notification to shop news channel
+      const newsChannelId = shopNews.get(interaction.guild.id);
+      if (newsChannelId) {
+        const newsChannel = interaction.guild.channels.cache.get(newsChannelId);
+        if (newsChannel) {
+          const newsEmbed = new EmbedBuilder()
+            .setColor('#00FF00')
+            .setTitle('🆕 New Item Added to Shop!')
+            .setDescription(`**${itemName}** is now available!\n\n💰 **Price:** ${itemPrice}\n📦 **Stock:** ${itemStock}\n👤 **Seller:** ${interaction.user}`)
+            .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
+            .setTimestamp()
+            .setFooter({ text: 'Shop System' });
+
+          try {
+            const sentMessage = await newsChannel.send({ embeds: [newsEmbed] });
+            await sentMessage.react('🛍️');
+          } catch (err) {
+            console.error('Error sending to shop news channel:', err);
+          }
+        }
+      }
+
       interaction.reply({ content: `✅ Added **${itemName}** for **${itemPrice}** with **${itemStock}** stock!`, ephemeral: true });
     }
+
+    // ========== SHOP CHANGE MODAL ==========
 
     if (interaction.customId.startsWith('shop_change_modal_')) {
       const itemId = interaction.customId.replace('shop_change_modal_', '');
@@ -1026,7 +1190,12 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 
+  // ==================== SELECT MENU INTERACTIONS ====================
+
   if (interaction.isStringSelectMenu()) {
+
+    // ========== SHOP REMOVE SELECT ==========
+
     if (interaction.customId === 'shop_remove_select') {
       const itemId = interaction.values[0];
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
@@ -1038,6 +1207,8 @@ client.on('interactionCreate', async (interaction) => {
       const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
       interaction.update({ content: `⚠️ Remove **${item.name}**?`, components: [row] });
     }
+
+    // ========== SHOP CHANGE SELECT ==========
 
     if (interaction.customId === 'shop_change_select') {
       const itemId = interaction.values[0];
@@ -1055,6 +1226,8 @@ client.on('interactionCreate', async (interaction) => {
       modal.addComponents(row1, row2, row3);
       await interaction.showModal(modal);
     }
+
+    // ========== SHOP SELECT ITEM ==========
 
     if (interaction.customId === 'shop_select_item') {
       const [sellerId, itemId] = interaction.values[0].split('-');
@@ -1105,5 +1278,7 @@ client.on('interactionCreate', async (interaction) => {
     }
   }
 });
+
+// ==================== BOT LOGIN ====================
 
 client.login(process.env.TOKEN);
