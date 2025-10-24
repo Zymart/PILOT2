@@ -83,7 +83,8 @@ async function saveData() {
     shopCategories: Object.fromEntries(shopCategories),
     transcriptChannels: Object.fromEntries(transcriptChannels),
     tradeChannels: Object.fromEntries(tradeChannels),
-    shopNews: Object.fromEntries(shopNews)
+    shopNews: Object.fromEntries(shopNews),
+    gameCategories: Object.fromEntries(gameCategories)
   };
 
   return new Promise((resolve) => {
@@ -135,7 +136,8 @@ function parseData(data) {
     shopCategories: new Map(Object.entries(data.shopCategories || {})),
     transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
     tradeChannels: new Map(Object.entries(data.tradeChannels || {})),
-    shopNews: new Map(Object.entries(data.shopNews || {}))
+    shopNews: new Map(Object.entries(data.shopNews || {})),
+    gameCategories: new Map(Object.entries(data.gameCategories || {}).map(([k, v]) => [k, v || []]))
   };
 }
 
@@ -152,7 +154,8 @@ function getEmptyData() {
     shopCategories: new Map(),
     transcriptChannels: new Map(),
     tradeChannels: new Map(),
-    shopNews: new Map()
+    shopNews: new Map(),
+    gameCategories: new Map()
   };
 }
 
@@ -169,6 +172,7 @@ let shopCategories = new Map();
 let transcriptChannels = new Map();
 let tradeChannels = new Map();
 let shopNews = new Map();
+let gameCategories = new Map(); // NEW: Store game categories per guild
 
 // ==================== BOT READY ====================
 
@@ -187,6 +191,7 @@ client.once('ready', async () => {
   transcriptChannels = loadedData.transcriptChannels;
   tradeChannels = loadedData.tradeChannels;
   shopNews = loadedData.shopNews || new Map();
+  gameCategories = loadedData.gameCategories || new Map();
   console.log('✅ Data loaded from cloud storage');
 
   setInterval(async () => {
@@ -252,42 +257,45 @@ client.on('messageCreate', async (message) => {
   // ========== ADMIN MANAGEMENT ==========
 
   if (command === 'admadm') {
-    if (!isOwner) return message.reply('❌ Only the owner can use this command!');
+    if (!isOwner) return message.reply('❌ Only the owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const userId = args[0];
-    if (!userId) return message.reply('Usage: `!admadm USER_ID`');
+    if (!userId) return message.reply('Usage: `!admadm USER_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const guildAdmins = adminUsers.get(message.guild.id) || [];
-    if (guildAdmins.includes(userId)) return message.reply('❌ This user is already an admin!');
+    if (guildAdmins.includes(userId)) return message.reply('❌ This user is already an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     guildAdmins.push(userId);
     adminUsers.set(message.guild.id, guildAdmins);
     saveData();
     const user = await client.users.fetch(userId).catch(() => null);
-    message.reply(`✅ Added **${user ? user.tag : userId}** as admin!`);
+    message.reply(`✅ Added **${user ? user.tag : userId}** as admin!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'admrem') {
-    if (!isOwner) return message.reply('❌ Only the owner can use this command!');
+    if (!isOwner) return message.reply('❌ Only the owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const userId = args[0];
-    if (!userId) return message.reply('Usage: `!admrem USER_ID`');
+    if (!userId) return message.reply('Usage: `!admrem USER_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const guildAdmins = adminUsers.get(message.guild.id) || [];
     const index = guildAdmins.indexOf(userId);
-    if (index === -1) return message.reply('❌ This user is not an admin!');
+    if (index === -1) return message.reply('❌ This user is not an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     guildAdmins.splice(index, 1);
     adminUsers.set(message.guild.id, guildAdmins);
     saveData();
     const user = await client.users.fetch(userId).catch(() => null);
-    message.reply(`✅ Removed **${user ? user.tag : userId}** from admins!`);
+    message.reply(`✅ Removed **${user ? user.tag : userId}** from admins!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'admlist') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!');
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const guildAdmins = adminUsers.get(message.guild.id) || [];
-    if (guildAdmins.length === 0) return message.reply('📋 No admins added yet!');
+    if (guildAdmins.length === 0) return message.reply('📋 No admins added yet!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     let adminList = '📋 **Admin List:**\n\n';
     for (const userId of guildAdmins) {
       const user = await client.users.fetch(userId).catch(() => null);
       adminList += `• ${user ? user.tag : userId} (${userId})\n`;
     }
-    message.reply(adminList);
+    message.reply(adminList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
+    message.delete().catch(() => {});
   }
 
   // Permission check for other commands
@@ -297,14 +305,65 @@ client.on('messageCreate', async (message) => {
       r.name.toLowerCase().includes('mod') ||
       r.permissions.has(PermissionFlagsBits.Administrator)
     );
-    if (!hasModerator) return message.reply('❌ You don\'t have permission!');
+    if (!hasModerator) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+  }
+
+  // ========== GAME CATEGORY MANAGEMENT ==========
+
+  if (command === 'addgame') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!addgame Game Name`\nExample: `!addgame Anime Vanguard`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = gameCategories.get(message.guild.id) || [];
+    if (guildGames.includes(gameName)) {
+      return message.reply(`❌ **${gameName}** already exists!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    guildGames.push(gameName);
+    gameCategories.set(message.guild.id, guildGames);
+    await saveData();
+    message.reply(`✅ Added game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'removegame') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!removegame Game Name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = gameCategories.get(message.guild.id) || [];
+    const index = guildGames.indexOf(gameName);
+    if (index === -1) {
+      return message.reply(`❌ **${gameName}** not found!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    guildGames.splice(index, 1);
+    gameCategories.set(message.guild.id, guildGames);
+    await saveData();
+    message.reply(`✅ Removed game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'listgames') {
+    const guildGames = gameCategories.get(message.guild.id) || [];
+    if (guildGames.length === 0) {
+      return message.reply('📋 No game categories yet! Use `!addgame Game Name` to add one.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    }
+
+    let gameList = '🎮 **Game Categories:**\n\n';
+    guildGames.forEach((game, index) => {
+      gameList += `${index + 1}. ${game}\n`;
+    });
+    message.reply(gameList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
+    message.delete().catch(() => {});
   }
 
   // ========== EMBED COMMANDS ==========
 
   if (command === 'embed') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!embed Your message here`');
+    if (!text) return message.reply('Usage: `!embed Your message here`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const embed = new EmbedBuilder()
       .setColor('#5865F2')
       .setDescription(text)
@@ -316,13 +375,13 @@ client.on('messageCreate', async (message) => {
       await sentMessage.react('✨');
     } catch (err) {
       console.error(err);
-      message.reply('❌ Failed!');
+      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
   }
 
   if (command === 'fancy') {
     const fullText = args.join(' ');
-    if (!fullText) return message.reply('Usage: `!fancy Title\nYour message`');
+    if (!fullText) return message.reply('Usage: `!fancy Title\nYour message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const lines = fullText.split('\n');
     const title = lines[0];
     const text = lines.slice(1).join('\n');
@@ -344,7 +403,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'announce') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!announce Your announcement`');
+    if (!text) return message.reply('Usage: `!announce Your announcement`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const embed = new EmbedBuilder()
       .setColor('#FFA500')
       .setTitle('📢 ANNOUNCEMENT')
@@ -362,7 +421,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'quote') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!quote Your quote`');
+    if (!text) return message.reply('Usage: `!quote Your quote`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const embed = new EmbedBuilder()
       .setColor('#2F3136')
       .setDescription(`*"${text}"*`)
@@ -380,7 +439,7 @@ client.on('messageCreate', async (message) => {
   if (command === 'colorembed') {
     const color = args[0];
     const text = args.slice(1).join(' ');
-    if (!color || !text) return message.reply('Usage: `!colorembed #FF0000 Message`');
+    if (!color || !text) return message.reply('Usage: `!colorembed #FF0000 Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const embed = new EmbedBuilder()
       .setColor(color)
       .setDescription(text)
@@ -391,13 +450,13 @@ client.on('messageCreate', async (message) => {
       await message.channel.send({ embeds: [embed] });
     } catch (err) {
       console.error(err);
-      message.reply('❌ Invalid color!');
+      message.reply('❌ Invalid color!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
   }
 
   if (command === 'success') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!success Message`');
+    if (!text) return message.reply('Usage: `!success Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const embed = new EmbedBuilder().setColor('#00FF00').setTitle('✅ Success').setDescription(text).setTimestamp();
     try {
       await message.delete();
@@ -409,7 +468,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'error') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!error Message`');
+    if (!text) return message.reply('Usage: `!error Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const embed = new EmbedBuilder().setColor('#FF0000').setTitle('❌ Error').setDescription(text).setTimestamp();
     try {
       await message.delete();
@@ -421,7 +480,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'info') {
     const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!info Message`');
+    if (!text) return message.reply('Usage: `!info Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const embed = new EmbedBuilder().setColor('#00BFFF').setTitle('ℹ️ Information').setDescription(text).setTimestamp();
     try {
       await message.delete();
@@ -433,7 +492,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'auto') {
     let text = args.join(' ');
-    if (!text) return message.reply('Usage: `!auto Message`');
+    if (!text) return message.reply('Usage: `!auto Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const fancyFont = (str) => {
       const normal = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
       const fancy = '𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵';
@@ -479,115 +538,121 @@ client.on('messageCreate', async (message) => {
   // ========== CONFIGURATION COMMANDS ==========
 
   if (command === 'concategory') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const categoryId = args[0];
-    if (!categoryId) return message.reply('Usage: `!concategory CATEGORY_ID`');
+    if (!categoryId) return message.reply('Usage: `!concategory CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const category = message.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
+    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     ticketCategories.set(message.guild.id, categoryId);
     saveData();
-    message.reply(`✅ Ticket category set to: **${category.name}**`);
+    message.reply(`✅ Ticket category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'conweb') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const categoryId = args[0];
-    if (!categoryId) return message.reply('Usage: `!conweb CATEGORY_ID`');
+    if (!categoryId) return message.reply('Usage: `!conweb CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const category = message.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
+    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     webCategories.set(message.guild.id, categoryId);
     saveData();
-    message.reply(`✅ Webhook category set to: **${category.name}**`);
+    message.reply(`✅ Webhook category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'conorders') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!conorders CHANNEL_ID`');
+    if (!channelId) return message.reply('Usage: `!conorders CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     orderChannels.set(message.guild.id, channelId);
     saveData();
-    message.reply(`✅ Orders log set to: <#${channelId}>`);
+    message.reply(`✅ Orders log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'condone') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!condone CHANNEL_ID`');
+    if (!channelId) return message.reply('Usage: `!condone CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     doneChannels.set(message.guild.id, channelId);
     saveData();
-    message.reply(`✅ Done log set to: <#${channelId}>`);
+    message.reply(`✅ Done log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'conshop') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const categoryId = args[0];
-    if (!categoryId) return message.reply('Usage: `!conshop CATEGORY_ID`');
+    if (!categoryId) return message.reply('Usage: `!conshop CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const category = message.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!');
+    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     shopCategories.set(message.guild.id, categoryId);
     saveData();
-    message.reply(`✅ Shop category set to: **${category.name}**`);
+    message.reply(`✅ Shop category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'contrade') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!contrade CHANNEL_ID`');
+    if (!channelId) return message.reply('Usage: `!contrade CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     tradeChannels.set(message.guild.id, channelId);
     saveData();
-    message.reply(`✅ Trade log set to: <#${channelId}>`);
+    message.reply(`✅ Trade log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   if (command === 'contranscript') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!');
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!contranscript CHANNEL_ID`');
+    if (!channelId) return message.reply('Usage: `!contranscript CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     transcriptChannels.set(message.guild.id, channelId);
     saveData();
-    message.reply(`✅ Transcript log set to: <#${channelId}>`);
+    message.reply(`✅ Transcript log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
-  // ========== SHOP NEWS COMMAND ==========
-
   if (command === 'connews') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!');
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!connews CHANNEL_ID`');
+    if (!channelId) return message.reply('Usage: `!connews CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!');
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     shopNews.set(message.guild.id, channelId);
     saveData();
-    message.reply(`✅ Shop news channel set to: <#${channelId}>`);
+    message.reply(`✅ Shop news channel set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
 
   // ========== STOCK MANAGEMENT COMMAND ==========
 
   if (command === 'stock') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!');
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
 
-    const action = args[0]; // + or -
+    const action = args[0];
     const amount = parseInt(args[1]);
     const userId = args[2];
     const itemName = args.slice(3).join(' ');
 
     if (!action || !amount || !userId || !itemName) {
-      return message.reply('Usage: `!stock +/- AMOUNT USER_ID ITEM_NAME`\nExample: `!stock + 10 123456789 Diamond Sword`');
+      return message.reply('Usage: `!stock +/- AMOUNT USER_ID ITEM_NAME`\nExample: `!stock + 10 123456789 Diamond Sword`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     }
 
     if (action !== '+' && action !== '-') {
-      return message.reply('❌ Action must be `+` or `-`');
+      return message.reply('❌ Action must be `+` or `-`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
 
     if (isNaN(amount) || amount <= 0) {
-      return message.reply('❌ Amount must be a positive number!');
+      return message.reply('❌ Amount must be a positive number!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
 
     const guildShops = shopListings.get(message.guild.id) || new Map();
@@ -596,7 +661,7 @@ client.on('messageCreate', async (message) => {
     const item = userItems.find(i => i.name.toLowerCase() === itemName.toLowerCase());
 
     if (!item) {
-      return message.reply(`❌ Item **${itemName}** not found for user <@${userId}>!`);
+      return message.reply(`❌ Item **${itemName}** not found for user <@${userId}>!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
 
     const oldStock = item.stock || 0;
@@ -611,27 +676,53 @@ client.on('messageCreate', async (message) => {
     shopListings.set(message.guild.id, guildShops);
     await saveData();
 
+    const user = await client.users.fetch(userId).catch(() => null);
     const stockEmbed = new EmbedBuilder()
       .setColor(action === '+' ? '#00FF00' : '#FF6B35')
-      .setTitle(`${action === '+' ? '📈' : '📉'} Stock Updated`)
-      .setDescription(`**Item:** ${item.name}\n**User:** <@${userId}>\n\n**Previous Stock:** ${oldStock}\n**Change:** ${action}${amount}\n**New Stock:** ${item.stock}`)
-      .setTimestamp()
-      .setFooter({ text: `Updated by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() });
+      .setAuthor({ 
+        name: action === '+' ? '📈 Stock Increased' : '📉 Stock Decreased', 
+        iconURL: message.guild.iconURL() 
+      })
+      .setTitle(`${item.name}`)
+      .setDescription(`Stock has been ${action === '+' ? '**increased**' : '**decreased**'} successfully!`)
+      .addFields(
+        { name: '🎮 Game', value: `\`\`\`${item.gameCategory || 'N/A'}\`\`\``, inline: true },
+        { name: '👤 Seller', value: `${user ? user : `<@${userId}>`}`, inline: true },
+        { name: '💰 Price', value: `\`\`\`${item.price}\`\`\``, inline: true },
+        { name: '📊 Previous Stock', value: `\`\`\`${oldStock}\`\`\``, inline: true },
+        { name: `${action === '+' ? '➕' : '➖'} Change`, value: `\`\`\`${action}${amount}\`\`\``, inline: true },
+        { name: '📦 New Stock', value: `\`\`\`${item.stock}\`\`\``, inline: true }
+      )
+      .setThumbnail(user ? user.displayAvatarURL({ size: 256 }) : message.guild.iconURL())
+      .setFooter({ text: `Updated by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() })
+      .setTimestamp();
 
-    message.reply({ embeds: [stockEmbed] });
+    message.reply({ embeds: [stockEmbed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
+    message.delete().catch(() => {});
 
-    // Send to shop news channel if configured
     const newsChannelId = shopNews.get(message.guild.id);
     if (newsChannelId) {
       const newsChannel = message.guild.channels.cache.get(newsChannelId);
       if (newsChannel) {
         const newsEmbed = new EmbedBuilder()
           .setColor(action === '+' ? '#00FF00' : '#FFA500')
-          .setTitle(`${action === '+' ? '🆕 New Stock Added!' : '⚠️ Stock Updated'}`)
-          .setDescription(`**${item.name}** by <@${userId}>\n\n${action === '+' ? '✨ Fresh stock available!' : '📊 Stock adjusted'}\n**Current Stock:** ${item.stock}\n**Price:** ${item.price}`)
+          .setAuthor({ 
+            name: action === '+' ? '🆕 Fresh Stock Available!' : '⚠️ Stock Update', 
+            iconURL: message.guild.iconURL() 
+          })
+          .setTitle(`${item.name}`)
+          .setDescription(`${action === '+' ? '✨ **New stock just arrived!** Get it while it lasts!' : '📊 **Stock has been adjusted**'}`)
+          .addFields(
+            { name: '🎮 Game', value: `${item.gameCategory || 'N/A'}`, inline: true },
+            { name: '📦 Stock', value: `**${item.stock}** available`, inline: true },
+            { name: '💰 Price', value: `${item.price}`, inline: true },
+            { name: '👤 Seller', value: `<@${userId}>`, inline: false }
+          )
+          .setThumbnail(user ? user.displayAvatarURL({ size: 256 }) : null)
           .setTimestamp();
 
-        await newsChannel.send({ embeds: [newsEmbed] });
+        const sentMsg = await newsChannel.send({ embeds: [newsEmbed] });
+        await sentMsg.react(action === '+' ? '🆕' : '📊');
       }
     }
   }
@@ -640,10 +731,10 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'createweb') {
     const channelName = args.join('-').toLowerCase();
-    if (!channelName) return message.reply('Usage: `!createweb name`');
+    if (!channelName) return message.reply('Usage: `!createweb name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const botMember = message.guild.members.cache.get(client.user.id);
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return message.reply('❌ Need Manage Channels!');
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return message.reply('❌ Need Manage Webhooks!');
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return message.reply('❌ Need Manage Channels!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return message.reply('❌ Need Manage Webhooks!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     try {
       let permissionOverwrites = [];
       let ticketOwner = null;
@@ -679,17 +770,17 @@ client.on('messageCreate', async (message) => {
       }
     } catch (err) {
       console.error('CreateWeb Error:', err);
-      message.reply(`❌ Failed! ${err.message}`);
+      message.reply(`❌ Failed! ${err.message}`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
   }
 
   // ========== DONE COMMAND ==========
 
   if (command === 'done') {
-    if (!message.channel.name.startsWith('ticket-')) return message.reply('❌ Only in tickets!');
+    if (!message.channel.name.startsWith('ticket-')) return message.reply('❌ Only in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const ticketOwnerName = message.channel.name.replace('ticket-', '');
     const ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-    if (!ticketOwner) return message.reply('❌ Owner not found!');
+    if (!ticketOwner) return message.reply('❌ Owner not found!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const doneButton = new ButtonBuilder().setCustomId('owner_done_confirmation').setLabel('Yes, Mark as Done').setEmoji('✅').setStyle(ButtonStyle.Success);
     const cancelButton = new ButtonBuilder().setCustomId('owner_cancel_done').setLabel('Not Yet').setEmoji('❌').setStyle(ButtonStyle.Danger);
     const row = new ActionRowBuilder().addComponents(doneButton, cancelButton);
@@ -701,7 +792,7 @@ client.on('messageCreate', async (message) => {
 
   if (command === 'ticket') {
     const fullText = args.join(' ');
-    if (!fullText) return message.reply('Usage: `!ticket Title\nDescription`');
+    if (!fullText) return message.reply('Usage: `!ticket Title\nDescription`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const lines = fullText.split('\n');
     const title = lines[0];
     const text = lines.slice(1).join('\n');
@@ -729,7 +820,7 @@ client.on('messageCreate', async (message) => {
       await message.channel.send({ embeds: [embed], components: [row] });
     } catch (err) {
       console.error(err);
-      message.reply('❌ Failed!');
+      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
   }
 
@@ -745,7 +836,7 @@ client.on('messageCreate', async (message) => {
       await message.channel.send({ embeds: [embed], components: [row] });
     } catch (err) {
       console.error(err);
-      message.reply('❌ Failed!');
+      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
   }
 
@@ -760,13 +851,15 @@ client.on('messageCreate', async (message) => {
         { name: '📝 Embed Commands', value: '`!embed <msg>` - Basic embed\n`!auto <msg>` - Auto-styled embed\n`!fancy <title>\\n<msg>` - Fancy embed\n`!announce <msg>` - Announcement\n`!quote <msg>` - Quote style\n`!colorembed #HEX <msg>` - Custom color\n`!success <msg>` - Success message\n`!error <msg>` - Error message\n`!info <msg>` - Info message', inline: false },
         { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Mark ticket as done\n`!createweb <name>` - Create webhook channel', inline: false },
         { name: '🛒 Shop System', value: '`!shop` - Create shop panel\n`!stock +/- <amount> <user_id> <item>` - Manage stock\nExample: `!stock + 10 123456 Sword`', inline: false },
+        { name: '🎮 Game Categories', value: '`!addgame <name>` - Add game category\n`!removegame <name>` - Remove game\n`!listgames` - List all games\nExample: `!addgame Anime Vanguard`', inline: false },
         { name: '⚙️ Configuration (Admin Only)', value: '`!concategory <id>` - Set ticket category\n`!conweb <id>` - Set webhook category\n`!conorders <id>` - Set orders log\n`!condone <id>` - Set done log\n`!conshop <id>` - Set shop category\n`!contrade <id>` - Set trade log\n`!contranscript <id>` - Set transcript log\n`!connews <id>` - Set shop news channel', inline: false },
         { name: '👑 Admin Management (Owner Only)', value: '`!admadm <user_id>` - Add admin\n`!admrem <user_id>` - Remove admin\n`!admlist` - List all admins', inline: false },
-        { name: '✨ Features', value: '✅ Anti-duplicate tickets\n✅ 3-step shop verification\n✅ Stock management\n✅ Auto shop news\n✅ Trade logging\n✅ Webhook integration\n✅ Permission system', inline: false }
+        { name: '✨ Features', value: '✅ Game-based categories\n✅ Anti-duplicate tickets\n✅ 3-step shop verification\n✅ Stock management\n✅ Auto shop news\n✅ Trade logging\n✅ Auto message cleanup\n✅ Webhook integration', inline: false }
       )
       .setFooter({ text: 'Made with ❤️ | All features fully functional' })
       .setTimestamp();
-    message.reply({ embeds: [helpEmbed] });
+    message.reply({ embeds: [helpEmbed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 60000));
+    message.delete().catch(() => {});
   }
 });
 
@@ -778,30 +871,30 @@ client.on('interactionCreate', async (interaction) => {
     // ========== SHOP BROWSE ==========
 
     if (interaction.customId === 'shop_browse') {
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      if (guildShops.size === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
-      const selectOptions = [];
-      let optionCount = 0;
-      for (const [userId, items] of guildShops) {
-        const user = await interaction.client.users.fetch(userId).catch(() => null);
-        const userName = user ? user.username : 'Unknown';
-        for (const item of items) {
-          if (optionCount < 25 && (item.stock || 0) > 0) {
-            selectOptions.push({ 
-              label: `${item.name} - ${item.price} (Stock: ${item.stock || 0})`, 
-              description: `Seller: ${userName}`, 
-              value: `${userId}-${item.id}` 
-            });
-            optionCount++;
-          }
-        }
+      const guildGames = gameCategories.get(interaction.guild.id) || [];
+
+      if (guildGames.length === 0) {
+        return interaction.reply({ content: '❌ No game categories! Ask admin to use `!addgame Game Name`', ephemeral: true });
       }
-      if (selectOptions.length === 0) {
-        return interaction.reply({ content: '❌ No items in stock!', ephemeral: true });
-      }
-      const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_select_item').setPlaceholder('Select an item').addOptions(selectOptions);
+
+      const selectOptions = guildGames.slice(0, 25).map(game => ({
+        label: game,
+        description: `Browse ${game} items`,
+        value: game
+      }));
+
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('shop_select_game')
+        .setPlaceholder('🎮 Select a game category')
+        .addOptions(selectOptions);
+
       const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ content: '🛒 Browse:', components: [row], ephemeral: true });
+
+      await interaction.reply({ 
+        content: '🎮 **What game are you looking for?**\nSelect a category below:', 
+        components: [row], 
+        ephemeral: true 
+      });
     }
 
     // ========== SHOP MANAGE ==========
@@ -817,15 +910,30 @@ client.on('interactionCreate', async (interaction) => {
     // ========== SHOP ADD ==========
 
     if (interaction.customId === 'shop_add') {
-      const modal = new ModalBuilder().setCustomId('shop_add_modal').setTitle('Add Item');
-      const nameInput = new TextInputBuilder().setCustomId('item_name').setLabel('Item Name').setPlaceholder('e.g., Diamond Sword').setStyle(TextInputStyle.Short).setRequired(true);
-      const stockInput = new TextInputBuilder().setCustomId('item_stock').setLabel('Stock').setPlaceholder('e.g., 10').setStyle(TextInputStyle.Short).setRequired(true);
-      const priceInput = new TextInputBuilder().setCustomId('item_price').setLabel('Price').setPlaceholder('e.g., 100').setStyle(TextInputStyle.Short).setRequired(true);
-      const row1 = new ActionRowBuilder().addComponents(nameInput);
-      const row2 = new ActionRowBuilder().addComponents(stockInput);
-      const row3 = new ActionRowBuilder().addComponents(priceInput);
-      modal.addComponents(row1, row2, row3);
-      await interaction.showModal(modal);
+      const guildGames = gameCategories.get(interaction.guild.id) || [];
+
+      if (guildGames.length === 0) {
+        return interaction.reply({ content: '❌ No game categories! Ask admin to use `!addgame Game Name`', ephemeral: true });
+      }
+
+      const selectOptions = guildGames.slice(0, 25).map(game => ({
+        label: game,
+        description: `Add item to ${game}`,
+        value: game
+      }));
+
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('shop_add_select_game')
+        .setPlaceholder('🎮 Select game category for your item')
+        .addOptions(selectOptions);
+
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+
+      await interaction.reply({ 
+        content: '🎮 **Which game is this item for?**', 
+        components: [row], 
+        ephemeral: true 
+      });
     }
 
     // ========== SHOP REMOVE ==========
@@ -834,9 +942,9 @@ client.on('interactionCreate', async (interaction) => {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const userItems = guildShops.get(interaction.user.id) || [];
       if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
-      const selectOptions = userItems.map(item => ({
+      const selectOptions = userItems.slice(0, 25).map(item => ({
         label: `${item.name} (Stock: ${item.stock || 0})`,
-        description: `Price: ${item.price}`,
+        description: `${item.gameCategory || 'No category'} - Price: ${item.price}`,
         value: item.id
       }));
       const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_remove_select').setPlaceholder('Select item to remove').addOptions(selectOptions);
@@ -850,9 +958,9 @@ client.on('interactionCreate', async (interaction) => {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const userItems = guildShops.get(interaction.user.id) || [];
       if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
-      const selectOptions = userItems.map(item => ({
+      const selectOptions = userItems.slice(0, 25).map(item => ({
         label: `${item.name} (Stock: ${item.stock || 0})`,
-        description: `Price: ${item.price}`,
+        description: `${item.gameCategory || 'No category'} - Price: ${item.price}`,
         value: item.id
       }));
       const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_change_select').setPlaceholder('Select item to edit').addOptions(selectOptions);
@@ -1007,11 +1115,7 @@ client.on('interactionCreate', async (interaction) => {
           } catch (err) {
             console.error('Error sending to done channel:', err);
           }
-        } else {
-          console.error(`❌ Done channel ${doneChannelId} not found`);
         }
-      } else {
-        console.log('⚠️ No done channel configured for this guild');
       }
       await interaction.update({ content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, components: [] });
       setTimeout(async () => {
@@ -1060,7 +1164,7 @@ client.on('interactionCreate', async (interaction) => {
           const tradeEmbed = new EmbedBuilder()
             .setColor('#00FF7F')
             .setTitle('✅ Trade Completed')
-            .setDescription(`**Item:** ${item.name}\n**Price:** ${item.price}\n**Seller:** ${seller ? seller : `<@${sellerId}>`}\n**Buyer:** ${interaction.user}\n\n**Remaining Stock:** ${item.stock}`)
+            .setDescription(`**Item:** ${item.name}\n**Game:** ${item.gameCategory || 'N/A'}\n**Price:** ${item.price}\n**Seller:** ${seller ? seller : `<@${sellerId}>`}\n**Buyer:** ${interaction.user}\n\n**Remaining Stock:** ${item.stock}`)
             .setTimestamp();
           await tradeChannel.send({ embeds: [tradeEmbed] });
         }
@@ -1130,7 +1234,8 @@ client.on('interactionCreate', async (interaction) => {
 
     // ========== SHOP ADD MODAL ==========
 
-    if (interaction.customId === 'shop_add_modal') {
+    if (interaction.customId.startsWith('shop_add_modal_')) {
+      const gameCategory = interaction.customId.replace('shop_add_modal_', '');
       const itemName = interaction.fields.getTextInputValue('item_name');
       const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
       const itemPrice = interaction.fields.getTextInputValue('item_price');
@@ -1138,12 +1243,11 @@ client.on('interactionCreate', async (interaction) => {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       let userItems = guildShops.get(interaction.user.id) || [];
       const itemId = `${Date.now()}`;
-      userItems.push({ id: itemId, name: itemName, price: itemPrice, stock: itemStock, seller: interaction.user.tag });
+      userItems.push({ id: itemId, name: itemName, price: itemPrice, stock: itemStock, seller: interaction.user.tag, gameCategory: gameCategory });
       guildShops.set(interaction.user.id, userItems);
       shopListings.set(interaction.guild.id, guildShops);
       await saveData();
 
-      // Send notification to shop news channel
       const newsChannelId = shopNews.get(interaction.guild.id);
       if (newsChannelId) {
         const newsChannel = interaction.guild.channels.cache.get(newsChannelId);
@@ -1151,7 +1255,7 @@ client.on('interactionCreate', async (interaction) => {
           const newsEmbed = new EmbedBuilder()
             .setColor('#00FF00')
             .setTitle('🆕 New Item Added to Shop!')
-            .setDescription(`**${itemName}** is now available!\n\n💰 **Price:** ${itemPrice}\n📦 **Stock:** ${itemStock}\n👤 **Seller:** ${interaction.user}`)
+            .setDescription(`**${itemName}** is now available!\n\n🎮 **Game:** ${gameCategory}\n💰 **Price:** ${itemPrice}\n📦 **Stock:** ${itemStock}\n👤 **Seller:** ${interaction.user}`)
             .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
             .setTimestamp()
             .setFooter({ text: 'Shop System' });
@@ -1165,7 +1269,7 @@ client.on('interactionCreate', async (interaction) => {
         }
       }
 
-      interaction.reply({ content: `✅ Added **${itemName}** for **${itemPrice}** with **${itemStock}** stock!`, ephemeral: true });
+      interaction.reply({ content: `✅ Added **${itemName}** to **${gameCategory}** for **${itemPrice}** with **${itemStock}** stock!`, ephemeral: true });
     }
 
     // ========== SHOP CHANGE MODAL ==========
@@ -1194,6 +1298,86 @@ client.on('interactionCreate', async (interaction) => {
 
   if (interaction.isStringSelectMenu()) {
 
+    // ========== SHOP SELECT GAME ==========
+
+    if (interaction.customId === 'shop_select_game') {
+      const selectedGame = interaction.values[0];
+      const guildShops = shopListings.get(interaction.guild.id) || new Map();
+
+      const selectOptions = [];
+      let optionCount = 0;
+
+      for (const [userId, items] of guildShops) {
+        const user = await interaction.client.users.fetch(userId).catch(() => null);
+        const userName = user ? user.username : 'Unknown';
+
+        for (const item of items) {
+          if (item.gameCategory === selectedGame && (item.stock || 0) > 0 && optionCount < 25) {
+            selectOptions.push({ 
+              label: `${item.name} - ${item.price} (Stock: ${item.stock || 0})`, 
+              description: `Seller: ${userName}`, 
+              value: `${userId}-${item.id}` 
+            });
+            optionCount++;
+          }
+        }
+      }
+
+      if (selectOptions.length === 0) {
+        return interaction.update({ content: `❌ No items in stock for **${selectedGame}**!`, components: [] });
+      }
+
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('shop_select_item')
+        .setPlaceholder('Select an item')
+        .addOptions(selectOptions);
+
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+
+      await interaction.update({ 
+        content: `🎮 **${selectedGame} Items:**\nSelect an item below:`, 
+        components: [row] 
+      });
+    }
+
+    // ========== SHOP ADD SELECT GAME ==========
+
+    if (interaction.customId === 'shop_add_select_game') {
+      const selectedGame = interaction.values[0];
+
+      const modal = new ModalBuilder()
+        .setCustomId(`shop_add_modal_${selectedGame}`)
+        .setTitle(`Add Item to ${selectedGame}`);
+
+      const nameInput = new TextInputBuilder()
+        .setCustomId('item_name')
+        .setLabel('Item Name')
+        .setPlaceholder('e.g., Diamond Sword')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      const stockInput = new TextInputBuilder()
+        .setCustomId('item_stock')
+        .setLabel('Stock')
+        .setPlaceholder('e.g., 10')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      const priceInput = new TextInputBuilder()
+        .setCustomId('item_price')
+        .setLabel('Price')
+        .setPlaceholder('e.g., 100')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+
+      const row1 = new ActionRowBuilder().addComponents(nameInput);
+      const row2 = new ActionRowBuilder().addComponents(stockInput);
+      const row3 = new ActionRowBuilder().addComponents(priceInput);
+
+      modal.addComponents(row1, row2, row3);
+      await interaction.showModal(modal);
+    }
+
     // ========== SHOP REMOVE SELECT ==========
 
     if (interaction.customId === 'shop_remove_select') {
@@ -1205,7 +1389,7 @@ client.on('interactionCreate', async (interaction) => {
       const confirmButton = new ButtonBuilder().setCustomId(`shop_confirm_remove_${itemId}`).setLabel('Confirm').setStyle(ButtonStyle.Danger);
       const cancelButton = new ButtonBuilder().setCustomId('shop_cancel_remove').setLabel('Cancel').setStyle(ButtonStyle.Secondary);
       const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
-      interaction.update({ content: `⚠️ Remove **${item.name}**?`, components: [row] });
+      interaction.update({ content: `⚠️ Remove **${item.name}** from **${item.gameCategory || 'Unknown'}**?`, components: [row] });
     }
 
     // ========== SHOP CHANGE SELECT ==========
@@ -1267,10 +1451,10 @@ client.on('interactionCreate', async (interaction) => {
         const itemEmbed = new EmbedBuilder()
           .setColor('#FFD700')
           .setTitle('🛍️ Shop Transaction')
-          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n**Item:** ${item.name}\n**Price:** ${item.price}\n**Stock:** ${item.stock}`)
+          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n🎮 **Game:** ${item.gameCategory || 'N/A'}\n**Item:** ${item.name}\n**Price:** ${item.price}\n**Stock:** ${item.stock}`)
           .setTimestamp();
         await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
-        interaction.reply({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, ephemeral: true });
+        interaction.update({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, components: [] });
       } catch (err) {
         console.error('Shop Ticket Error:', err);
         interaction.reply({ content: '❌ Failed to create shop ticket!', ephemeral: true });
