@@ -1,31 +1,4 @@
-// ========== CLOSE TICKET ==========
-
-    if (interaction.customId === 'close_ticket') {
-      if (!interaction.channel.name.startsWith('ticket-') && !interaction.channel.name.startsWith('shop-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
-      await interaction.reply('🔒 Closing in 5 seconds...');
-      setTimeout(async () => {
-        const ticketId = interaction.channel.id;
-        const createdChannels = ticketChannels.get(ticketId) || [];
-        for (const channelId of createdChannels) {
-          const channelToDelete = interaction.guild.channels.cache.get(channelId);
-          if (channelToDelete) await channelToDelete.delete().catch(console.error);
-        }
-        ticketChannels.delete(ticketId);
-        ticketOwners.delete(ticketId);
-        await saveData();
-        await interaction.channel.delete().catch(console.error);
-      }, 5000);
-    }
-
-    // ========== CLOSE TICKET CONFIRM ==========
-
-    if (interaction.customId === 'close_ticket_confirm') {
-      const isOwner = interaction.user.id === OWNER_ID;
-      const admins = adminUsers.get(interaction.guild.id) || [];
-      const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-
-      await interaction// Fix for ReadableStream error in Replit
+// Fix for ReadableStream error in Replit
 if (!global.ReadableStream) {
   global.ReadableStream = require('stream/web').ReadableStream;
 }
@@ -808,82 +781,10 @@ client.on('messageCreate', async (message) => {
     const ticketOwnerName = message.channel.name.replace('ticket-', '');
     const ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
     if (!ticketOwner) return message.reply('❌ Owner not found!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
-    const guideEmbed = new EmbedBuilder()
-      .setColor('#00BFFF')
-      .setTitle('ℹ️ How to Mark Ticket as Done')
-      .setDescription('**Follow these steps:**\n\n1️⃣ Click **"Yes, Mark as Done"** to confirm\n2️⃣ Admin will receive notification\n3️⃣ Admin confirms the completion\n4️⃣ Ticket closes automatically\n\n**Note:** Only the ticket owner can mark as done!')
-      .setFooter({ text: 'Click the button below to proceed' })
-      .setTimestamp();
-
     const doneButton = new ButtonBuilder().setCustomId('owner_done_confirmation').setLabel('Yes, Mark as Done').setEmoji('✅').setStyle(ButtonStyle.Success);
     const cancelButton = new ButtonBuilder().setCustomId('owner_cancel_done').setLabel('Not Yet').setEmoji('❌').setStyle(ButtonStyle.Danger);
     const row = new ActionRowBuilder().addComponents(doneButton, cancelButton);
-    await message.channel.send({ content: `${ticketOwner.user}`, embeds: [guideEmbed], components: [row] });
-    await message.delete().catch(() => {});
-  }
-
-  // ========== FORCE DONE COMMAND (ADMIN/OWNER ONLY) ==========
-
-  if (command === 'forcedone') {
-    if (!canUseCommands) return message.reply('❌ Only admins and owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    if (!message.channel.name.startsWith('ticket-') && !message.channel.name.startsWith('shop-')) {
-      return message.reply('❌ This command only works in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    const guideEmbed = new EmbedBuilder()
-      .setColor('#FF6B35')
-      .setTitle('⚠️ Force Complete Ticket')
-      .setDescription('**Admin Override:**\n\nYou are about to force-complete this ticket without customer confirmation.\n\n**This will:**\n✅ Mark ticket as done\n📊 Log to done channel\n🔒 Close ticket in 5 seconds\n\n**Use this when:**\n• Customer is unresponsive\n• Service is confirmed complete\n• Emergency closure needed')
-      .setFooter({ text: 'This action cannot be undone' })
-      .setTimestamp();
-
-    const confirmButton = new ButtonBuilder()
-      .setCustomId('force_done_confirm')
-      .setLabel('Confirm Force Done')
-      .setEmoji('⚡')
-      .setStyle(ButtonStyle.Danger);
-
-    const cancelButton = new ButtonBuilder()
-      .setCustomId('force_done_cancel')
-      .setLabel('Cancel')
-      .setEmoji('❌')
-      .setStyle(ButtonStyle.Secondary);
-
-    const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
-    await message.channel.send({ embeds: [guideEmbed], components: [row] });
-    await message.delete().catch(() => {});
-  }
-
-  // ========== CLOSE COMMAND (ADMIN/OWNER ONLY) ==========
-
-  if (command === 'close') {
-    if (!canUseCommands) return message.reply('❌ Only admins and owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    if (!message.channel.name.startsWith('ticket-') && !message.channel.name.startsWith('shop-')) {
-      return message.reply('❌ This command only works in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    const guideEmbed = new EmbedBuilder()
-      .setColor('#FF0000')
-      .setTitle('🔒 Close Ticket')
-      .setDescription('**You are about to close this ticket.**\n\n**This will:**\n🗑️ Delete this ticket channel\n🗑️ Delete all related channels\n🗑️ Remove ticket from system\n\n**Warning:**\n⚠️ No completion log will be created\n⚠️ Use `!forcedone` if service was completed\n⚠️ This action cannot be undone')
-      .setFooter({ text: 'Choose wisely' })
-      .setTimestamp();
-
-    const confirmButton = new ButtonBuilder()
-      .setCustomId('close_ticket_confirm')
-      .setLabel('Yes, Close Ticket')
-      .setEmoji('🔒')
-      .setStyle(ButtonStyle.Danger);
-
-    const cancelButton = new ButtonBuilder()
-      .setCustomId('close_ticket_cancel')
-      .setLabel('Cancel')
-      .setEmoji('❌')
-      .setStyle(ButtonStyle.Secondary);
-
-    const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
-    await message.channel.send({ embeds: [guideEmbed], components: [row] });
+    await message.channel.send({ content: `${ticketOwner.user}\n\n**Mark this ticket as done?**\nClick below to confirm.`, components: [row] });
     await message.delete().catch(() => {});
   }
 
@@ -976,13 +877,6 @@ client.on('interactionCreate', async (interaction) => {
         return interaction.reply({ content: '❌ No game categories! Ask admin to use `!addgame Game Name`', ephemeral: true });
       }
 
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#FFD700')
-        .setTitle('🛍️ Shop Guide - How to Browse')
-        .setDescription('**Follow these simple steps:**\n\n1️⃣ Select a game category below\n2️⃣ Browse available items\n3️⃣ Select an item you want\n4️⃣ A private shop ticket will open\n5️⃣ Complete the trade with the seller\n\n**Tip:** Only items with stock available will show!')
-        .setFooter({ text: 'Select a game category to start shopping' })
-        .setTimestamp();
-
       const selectOptions = guildGames.slice(0, 25).map(game => ({
         label: game,
         description: `Browse ${game} items`,
@@ -997,7 +891,7 @@ client.on('interactionCreate', async (interaction) => {
       const row = new ActionRowBuilder().addComponents(selectMenu);
 
       await interaction.reply({ 
-        embeds: [guideEmbed],
+        content: '🎮 **What game are you looking for?**\nSelect a category below:', 
         components: [row], 
         ephemeral: true 
       });
@@ -1006,18 +900,11 @@ client.on('interactionCreate', async (interaction) => {
     // ========== SHOP MANAGE ==========
 
     if (interaction.customId === 'shop_manage') {
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#5865F2')
-        .setTitle('⚙️ Shop Management Guide')
-        .setDescription('**Choose an action below:**\n\n➕ **Add Item** - List a new item in the shop\n• Select game category\n• Enter item details\n• Set price and stock\n\n✏️ **Change Item** - Update existing item\n• Modify name, price, or stock\n• Changes are instant\n\n🗑️ **Remove Item** - Delete item from shop\n• Permanently removes listing\n• Cannot be undone')
-        .setFooter({ text: 'Select an option below to continue' })
-        .setTimestamp();
-
       const addButton = new ButtonBuilder().setCustomId('shop_add').setLabel('Add Item').setEmoji('➕').setStyle(ButtonStyle.Success);
       const removeButton = new ButtonBuilder().setCustomId('shop_remove').setLabel('Remove Item').setEmoji('➖').setStyle(ButtonStyle.Danger);
       const changeButton = new ButtonBuilder().setCustomId('shop_change').setLabel('Change Item').setEmoji('✏️').setStyle(ButtonStyle.Primary);
       const row = new ActionRowBuilder().addComponents(addButton, removeButton, changeButton);
-      interaction.reply({ embeds: [guideEmbed], components: [row], ephemeral: true });
+      interaction.reply({ content: '🛒 **Manage Shop**\nChoose action:', components: [row], ephemeral: true });
     }
 
     // ========== SHOP ADD ==========
@@ -1028,13 +915,6 @@ client.on('interactionCreate', async (interaction) => {
       if (guildGames.length === 0) {
         return interaction.reply({ content: '❌ No game categories! Ask admin to use `!addgame Game Name`', ephemeral: true });
       }
-
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setTitle('➕ Add New Item - Step 1')
-        .setDescription('**Select the game category for your item:**\n\nThis helps buyers find your items easily!\n\n**Next steps:**\n2️⃣ Enter item name\n3️⃣ Set stock amount\n4️⃣ Set price\n5️⃣ Item goes live!')
-        .setFooter({ text: 'Choose a game category below' })
-        .setTimestamp();
 
       const selectOptions = guildGames.slice(0, 25).map(game => ({
         label: game,
@@ -1050,7 +930,7 @@ client.on('interactionCreate', async (interaction) => {
       const row = new ActionRowBuilder().addComponents(selectMenu);
 
       await interaction.reply({ 
-        embeds: [guideEmbed],
+        content: '🎮 **Which game is this item for?**', 
         components: [row], 
         ephemeral: true 
       });
@@ -1062,14 +942,6 @@ client.on('interactionCreate', async (interaction) => {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const userItems = guildShops.get(interaction.user.id) || [];
       if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
-
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#FF6B6B')
-        .setTitle('🗑️ Remove Item Guide')
-        .setDescription('**Warning:**\n\n⚠️ This will permanently delete the item\n⚠️ Cannot be undone\n⚠️ Buyers will no longer see this item\n\n**Select the item you want to remove:**')
-        .setFooter({ text: 'You will be asked to confirm' })
-        .setTimestamp();
-
       const selectOptions = userItems.slice(0, 25).map(item => ({
         label: `${item.name} (Stock: ${item.stock || 0})`,
         description: `${item.gameCategory || 'No category'} - Price: ${item.price}`,
@@ -1077,7 +949,7 @@ client.on('interactionCreate', async (interaction) => {
       }));
       const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_remove_select').setPlaceholder('Select item to remove').addOptions(selectOptions);
       const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ embeds: [guideEmbed], components: [row], ephemeral: true });
+      interaction.reply({ content: '🗑️ Select item:', components: [row], ephemeral: true });
     }
 
     // ========== SHOP CHANGE ==========
@@ -1086,14 +958,6 @@ client.on('interactionCreate', async (interaction) => {
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const userItems = guildShops.get(interaction.user.id) || [];
       if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
-
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#5865F2')
-        .setTitle('✏️ Change Item Guide')
-        .setDescription('**You can update:**\n\n📝 Item name\n💰 Price\n📦 Stock amount\n\n**Note:**\n• Changes are instant\n• Buyers will see updated info\n• Game category cannot be changed\n\n**Select the item you want to edit:**')
-        .setFooter({ text: 'A form will open with current values' })
-        .setTimestamp();
-
       const selectOptions = userItems.slice(0, 25).map(item => ({
         label: `${item.name} (Stock: ${item.stock || 0})`,
         description: `${item.gameCategory || 'No category'} - Price: ${item.price}`,
@@ -1101,7 +965,7 @@ client.on('interactionCreate', async (interaction) => {
       }));
       const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_change_select').setPlaceholder('Select item to edit').addOptions(selectOptions);
       const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ embeds: [guideEmbed], components: [row], ephemeral: true });
+      interaction.reply({ content: '✏️ Select item:', components: [row], ephemeral: true });
     }
 
     // ========== CREATE TICKET ==========
@@ -1128,56 +992,12 @@ client.on('interactionCreate', async (interaction) => {
       let userItems = guildShops.get(interaction.user.id) || [];
       const itemIndex = userItems.findIndex(i => i.id === itemId);
       if (itemIndex === -1) return interaction.update({ content: '❌ Not found!', components: [] });
-
-      const removedItem = userItems[itemIndex];
+      const itemName = userItems[itemIndex].name;
       userItems.splice(itemIndex, 1);
       guildShops.set(interaction.user.id, userItems);
       shopListings.set(interaction.guild.id, guildShops);
       await saveData();
-
-      // Send beautiful removal confirmation
-      const removeEmbed = new EmbedBuilder()
-        .setColor('#FF0000')
-        .setAuthor({ name: '🗑️ Item Removed Successfully!', iconURL: interaction.user.displayAvatarURL() })
-        .setTitle(removedItem.name)
-        .setDescription('This item has been removed from your shop.')
-        .addFields(
-          { name: '🎮 Game', value: `\`\`\`${removedItem.gameCategory || 'N/A'}\`\`\``, inline: true },
-          { name: '💰 Price', value: `\`\`\`${removedItem.price}\`\`\``, inline: true },
-          { name: '📦 Stock', value: `\`\`\`${removedItem.stock || 0}\`\`\``, inline: true }
-        )
-        .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-        .setFooter({ text: 'Shop Management System' })
-        .setTimestamp();
-
-      interaction.update({ embeds: [removeEmbed], components: [] });
-
-      // Send to news channel if item had high stock
-      const newsChannelId = shopNews.get(interaction.guild.id);
-      if (newsChannelId && removedItem.stock > 10) {
-        const newsChannel = interaction.guild.channels.cache.get(newsChannelId);
-        if (newsChannel) {
-          const newsEmbed = new EmbedBuilder()
-            .setColor('#FF6B6B')
-            .setAuthor({ name: '⚠️ ITEM REMOVED FROM SHOP', iconURL: interaction.guild.iconURL() })
-            .setTitle(`${removedItem.name}`)
-            .setDescription(`📢 **This item is no longer available for purchase.**`)
-            .addFields(
-              { name: '🎮 Game', value: `${removedItem.gameCategory || 'N/A'}`, inline: true },
-              { name: '👤 Seller', value: `${interaction.user}`, inline: true }
-            )
-            .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-            .setFooter({ text: 'Check !shop for available items' })
-            .setTimestamp();
-
-          try {
-            const sentMessage = await newsChannel.send({ embeds: [newsEmbed] });
-            await sentMessage.react('⚠️');
-          } catch (err) {
-            console.error('Error sending to shop news channel:', err);
-          }
-        }
-      }
+      interaction.update({ content: `✅ Removed **${itemName}**!`, components: [] });
     }
 
     // ========== SHOP CANCEL REMOVE ==========
@@ -1186,20 +1006,11 @@ client.on('interactionCreate', async (interaction) => {
       interaction.update({ content: '❌ Cancelled.', components: [] });
     }
 
-    // ========== CLOSE TICKET CONFIRM ==========
+    // ========== CLOSE TICKET ==========
 
-    if (interaction.customId === 'close_ticket_confirm') {
-      const isOwner = interaction.user.id === OWNER_ID;
-      const admins = adminUsers.get(interaction.guild.id) || [];
-      const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-
-      await interaction.update({ 
-        content: `🔒 **Ticket closed by ${interaction.user}**\n\nDeleting in 5 seconds...`, 
-        embeds: [], 
-        components: [] 
-      });
-
+    if (interaction.customId === 'close_ticket') {
+      if (!interaction.channel.name.startsWith('ticket-') && !interaction.channel.name.startsWith('shop-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
+      await interaction.reply('🔒 Closing in 5 seconds...');
       setTimeout(async () => {
         const ticketId = interaction.channel.id;
         const createdChannels = ticketChannels.get(ticketId) || [];
@@ -1212,116 +1023,6 @@ client.on('interactionCreate', async (interaction) => {
         await saveData();
         await interaction.channel.delete().catch(console.error);
       }, 5000);
-    }
-
-    // ========== CLOSE TICKET CANCEL ==========
-
-    if (interaction.customId === 'close_ticket_cancel') {
-      await interaction.update({ content: '❌ Close cancelled.', embeds: [], components: [] });
-    }
-
-    // ========== FORCE DONE CONFIRM ==========
-
-    if (interaction.customId === 'force_done_confirm') {
-      const isOwner = interaction.user.id === OWNER_ID;
-      const admins = adminUsers.get(interaction.guild.id) || [];
-      const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-
-      // Defer update to prevent timeout
-      await interaction.deferUpdate().catch(() => {});
-
-      const ticketOwnerName = interaction.channel.name.replace('ticket-', '').replace('shop-', '');
-      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase().includes(ticketOwnerName.toLowerCase()));
-
-      let serviceDescription = 'N/A';
-      try {
-        const messages = await interaction.channel.messages.fetch({ limit: 50 });
-        const messagesArray = Array.from(messages.values()).reverse();
-
-        for (const msg of messagesArray) {
-          if (msg.content && msg.content.includes('Service Request:')) {
-            const parts = msg.content.split('Service Request:');
-            if (parts.length > 1) {
-              serviceDescription = parts[1].trim().split('\n')[0].trim();
-              break;
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching service description:', err);
-      }
-
-      const doneChannelId = doneChannels.get(interaction.guild.id);
-      if (doneChannelId) {
-        const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
-        if (doneChannel) {
-          const currentTimestamp = Math.floor(Date.now() / 1000);
-
-          const forceMessage = `
-╔═══════════════════════════════════╗
-║  ⚡ **𝗙𝗢𝗥𝗖𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗**  ║
-╚═══════════════════════════════════╝
-
-⚠️ **Admin force-completed this service**
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📦 **𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦:**
-\`\`\`
-${serviceDescription}
-\`\`\`
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-👤 **𝗖𝗨𝗦𝗧𝗢𝗠𝗘𝗥:** ${ticketOwner ? ticketOwner.user : ticketOwnerName}
-⚡ **𝗙𝗢𝗥𝗖𝗘𝗗 𝗕𝗬:** ${interaction.user}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⏰ **𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗:** <t:${currentTimestamp}:F>
-📅 **𝗧𝗜𝗠𝗘 𝗔𝗚𝗢:** <t:${currentTimestamp}:R>
-          `.trim();
-
-          try {
-            const sentMessage = await doneChannel.send(forceMessage);
-            await sentMessage.react('⚡');
-            await sentMessage.react('✅');
-            await sentMessage.react('⚠️');
-          } catch (err) {
-            console.error('Error sending to done channel:', err);
-          }
-        }
-      }
-
-      try {
-        await interaction.editReply({ 
-          content: `⚡ **Force completed by ${interaction.user}!**\n\nClosing in 5 seconds...`, 
-          embeds: [], 
-          components: [] 
-        }).catch(() => {});
-      } catch (err) {
-        console.error('Error updating message:', err);
-      }
-
-      setTimeout(async () => {
-        const ticketId = interaction.channel.id;
-        const createdChannels = ticketChannels.get(ticketId) || [];
-        for (const channelId of createdChannels) {
-          const channelToDelete = interaction.guild.channels.cache.get(channelId);
-          if (channelToDelete) await channelToDelete.delete().catch(console.error);
-        }
-        ticketChannels.delete(ticketId);
-        ticketOwners.delete(ticketId);
-        await saveData();
-        await interaction.channel.delete().catch(console.error);
-      }, 5000);
-    }
-
-    // ========== FORCE DONE CANCEL ==========
-
-    if (interaction.customId === 'force_done_cancel') {
-      await interaction.update({ content: '❌ Force done cancelled.', embeds: [], components: [] });
     }
 
     // ========== DONE TICKET ==========
@@ -1331,18 +1032,10 @@ ${serviceDescription}
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
       if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only ticket creator!', ephemeral: true });
-
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setTitle('✅ Mark as Done - Confirmation')
-        .setDescription('**You are requesting completion confirmation.**\n\n**What happens next:**\n1️⃣ Admin receives notification\n2️⃣ Admin reviews the service\n3️⃣ Admin confirms completion\n4️⃣ Logged to done channel\n5️⃣ Ticket closes automatically\n\n**Note:** Admins can approve or deny this request.')
-        .setFooter({ text: 'Waiting for admin confirmation...' })
-        .setTimestamp();
-
       const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
       const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
       const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
-      await interaction.reply({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, embeds: [guideEmbed], components: [confirmRow] });
+      await interaction.reply({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
     }
 
     // ========== OWNER DONE CONFIRMATION ==========
@@ -1352,18 +1045,10 @@ ${serviceDescription}
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
       if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only creator!', ephemeral: true });
-
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setTitle('✅ Completion Request Sent')
-        .setDescription('**Your request has been sent to admins.**\n\n**What happens next:**\n1️⃣ Admin reviews your request\n2️⃣ Admin checks service completion\n3️⃣ Admin approves or denies\n4️⃣ You will be notified\n\n**Please wait for admin response...**')
-        .setFooter({ text: 'Admins will respond shortly' })
-        .setTimestamp();
-
       const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
       const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
       const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
-      await interaction.update({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, embeds: [guideEmbed], components: [confirmRow] });
+      await interaction.update({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
     }
 
     // ========== OWNER CANCEL DONE ==========
@@ -1381,9 +1066,6 @@ ${serviceDescription}
       const isAdmin = admins.includes(interaction.user.id);
       if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
 
-      // Defer update to prevent timeout
-      await interaction.deferUpdate().catch(() => {});
-
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
 
@@ -1410,58 +1092,32 @@ ${serviceDescription}
         const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
         if (doneChannel) {
           const currentTimestamp = Math.floor(Date.now() / 1000);
-
-          const doneMessage = `
-╔═══════════════════════════════════╗
-║   ✅ **𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗**   ║
-╚═══════════════════════════════════╝
-
-🎉 **Service successfully delivered and confirmed!**
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📦 **𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦:**
-\`\`\`
-${serviceDescription}
-\`\`\`
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-👤 **𝗖𝗨𝗦𝗧𝗢𝗠𝗘𝗥:** ${ticketOwner ? ticketOwner.user : ticketOwnerName}
-✅ **𝗖𝗢𝗡𝗙𝗜𝗥𝗠𝗘𝗗 𝗕𝗬:** ${interaction.user}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-⏰ **𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗:** <t:${currentTimestamp}:F>
-📅 **𝗧𝗜𝗠𝗘 𝗔𝗚𝗢:** <t:${currentTimestamp}:R>
-          `.trim();
+          const doneEmbed = new EmbedBuilder()
+            .setColor('#00FF7F')
+            .setAuthor({ name: '✅ Service Completed', iconURL: interaction.guild.iconURL() })
+            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!`)
+            .setDescription(`🎉 **Service successfully delivered and confirmed!**\n\n📦 **Service Details:**\n${serviceDescription}`)
+            .addFields(
+              { name: '👤 Customer', value: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, inline: true },
+              { name: '✅ Confirmed By', value: `${interaction.user}`, inline: true },
+              { name: '⏰ Completed At', value: `<t:${currentTimestamp}:F>\n(<t:${currentTimestamp}:R>)`, inline: false }
+            )
+            .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ size: 256 }) : null)
+            .setImage(interaction.user.displayAvatarURL({ size: 512 }))
+            .setFooter({ text: `Admin: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
+            .setTimestamp();
 
           try {
-            const sentMessage = await doneChannel.send(doneMessage);
+            const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
             await sentMessage.react('✅');
             await sentMessage.react('🎉');
-            await sentMessage.react('⭐');
             console.log(`✅ Sent done log to channel ${doneChannelId}`);
           } catch (err) {
             console.error('Error sending to done channel:', err);
           }
-        } else {
-          console.error(`❌ Done channel ${doneChannelId} not found`);
         }
-      } else {
-        console.log('⚠️ No done channel configured for this guild');
       }
-
-      try {
-        await interaction.editReply({ 
-          content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, 
-          embeds: [], 
-          components: [] 
-        }).catch(() => {});
-      } catch (err) {
-        console.error('Error updating message:', err);
-      }
-
+      await interaction.update({ content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, components: [] });
       setTimeout(async () => {
         const ticketId = interaction.channel.id;
         const createdChannels = ticketChannels.get(ticketId) || [];
@@ -1483,237 +1139,42 @@ ${serviceDescription}
       const admins = adminUsers.get(interaction.guild.id) || [];
       const isAdmin = admins.includes(interaction.user.id);
       if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-      await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, embeds: [], components: [] });
+      await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
     }
 
-    // ========== SHOP BUYER DONE (BUYER CLICKS FIRST) ==========
+    // ========== SHOP TRADE DONE ==========
 
-    if (interaction.customId.startsWith('shop_buyer_done_')) {
-      const parts = interaction.customId.replace('shop_buyer_done_', '').split('_');
+    if (interaction.customId.startsWith('shop_trade_done_')) {
+      const parts = interaction.customId.replace('shop_trade_done_', '').split('_');
       const sellerId = parts[0];
       const itemId = parts[1];
-
-      // Check if buyer is the one clicking
-      const ticketOwnerId = ticketOwners.get(interaction.channel.id);
-      if (ticketOwnerId && interaction.user.id !== ticketOwnerId) {
-        return interaction.reply({ content: '❌ Only the buyer can mark this as done!', ephemeral: true });
-      }
-
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setTitle('✅ Transaction Complete?')
-        .setDescription('**You are confirming transaction completion.**\n\n**What happens next:**\n1️⃣ Admin receives notification\n2️⃣ Admin reviews the transaction\n3️⃣ Admin confirms completion\n4️⃣ Stock decreases by 1\n5️⃣ Logged to done & trade channels\n6️⃣ Ticket closes automatically\n\n**Note:** Make sure you received the item!')
-        .setFooter({ text: 'Click confirm to proceed' })
-        .setTimestamp();
-
-      const confirmButton = new ButtonBuilder()
-        .setCustomId(`shop_confirm_done_${sellerId}_${itemId}`)
-        .setLabel('Yes, I Received It')
-        .setEmoji('✅')
-        .setStyle(ButtonStyle.Success);
-
-      const cancelButton = new ButtonBuilder()
-        .setCustomId('shop_cancel_done')
-        .setLabel('Not Yet')
-        .setEmoji('❌')
-        .setStyle(ButtonStyle.Danger);
-
-      const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
-
-      await interaction.reply({ 
-        content: `${interaction.user}`, 
-        embeds: [guideEmbed], 
-        components: [row] 
-      });
-    }
-
-    // ========== SHOP CONFIRM DONE (SENDS TO ADMIN) ==========
-
-    if (interaction.customId.startsWith('shop_confirm_done_')) {
-      const parts = interaction.customId.replace('shop_confirm_done_', '').split('_');
-      const sellerId = parts[0];
-      const itemId = parts[1];
-
-      const guideEmbed = new EmbedBuilder()
-        .setColor('#FFA500')
-        .setTitle('⏳ Waiting for Admin Confirmation')
-        .setDescription('**Your completion request has been sent!**\n\n**Admin will now:**\n✅ Review the transaction\n✅ Verify completion\n✅ Approve or deny\n\n**Please wait for admin response...**')
-        .setFooter({ text: 'Admins have been notified' })
-        .setTimestamp();
-
-      const adminConfirmButton = new ButtonBuilder()
-        .setCustomId(`shop_admin_confirm_${sellerId}_${itemId}`)
-        .setLabel('Confirm Transaction')
-        .setEmoji('✅')
-        .setStyle(ButtonStyle.Success);
-
-      const adminDenyButton = new ButtonBuilder()
-        .setCustomId('shop_admin_deny')
-        .setLabel('Deny')
-        .setEmoji('❌')
-        .setStyle(ButtonStyle.Danger);
-
-      const adminRow = new ActionRowBuilder().addComponents(adminConfirmButton, adminDenyButton);
-
-      await interaction.update({ 
-        content: `⏳ **${interaction.user}** marked transaction as complete!\n\n**@Admins:** Please verify and confirm.`, 
-        embeds: [guideEmbed], 
-        components: [adminRow] 
-      });
-    }
-
-    // ========== SHOP ADMIN CONFIRM (FINAL CONFIRMATION) ==========
-
-    if (interaction.customId.startsWith('shop_admin_confirm_')) {
-      const isOwner = interaction.user.id === OWNER_ID;
-      const admins = adminUsers.get(interaction.guild.id) || [];
-      const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-
-      // Defer update to prevent timeout
-      await interaction.deferUpdate().catch(() => {});
-
-      const parts = interaction.customId.replace('shop_admin_confirm_', '').split('_');
-      const sellerId = parts[0];
-      const itemId = parts[1];
-      const buyerId = ticketOwners.get(interaction.channel.id) || 'Unknown';
-
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const sellerItems = guildShops.get(sellerId) || [];
       const item = sellerItems.find(i => i.id === itemId);
-
-      if (!item) {
-        return interaction.followUp({ content: '❌ Item not found!', ephemeral: true }).catch(() => {});
-      }
-
+      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
       item.stock = Math.max(0, (item.stock || 0) - 1);
       guildShops.set(sellerId, sellerItems);
       shopListings.set(interaction.guild.id, guildShops);
       await saveData();
-
-      // Send to trade log channel
       const tradeChannelId = tradeChannels.get(interaction.guild.id);
       if (tradeChannelId) {
         const tradeChannel = interaction.guild.channels.cache.get(tradeChannelId);
         if (tradeChannel) {
-          const tradeMessage = `
-╔═══════════════════════════════════╗
-║        ✅ **𝗧𝗥𝗔𝗗𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗**        ║
-╚═══════════════════════════════════╝
-
-🎮 **𝗚𝗔𝗠𝗘:** \`${item.gameCategory || 'N/A'}\`
-🛍️ **𝗜𝗧𝗘𝗠:** \`${item.name}\`
-💰 **𝗣𝗥𝗜𝗖𝗘:** \`${item.price}\`
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-👤 **𝗦𝗘𝗟𝗟𝗘𝗥:** <@${sellerId}>
-🛒 **𝗕𝗨𝗬𝗘𝗥:** <@${buyerId}>
-✅ **𝗖𝗢𝗡𝗙𝗜𝗥𝗠𝗘𝗗 𝗕𝗬:** ${interaction.user}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-📦 **𝗥𝗘𝗠𝗔𝗜𝗡𝗜𝗡𝗚 𝗦𝗧𝗢𝗖𝗞:** \`${item.stock}\`
-
-⏰ <t:${Math.floor(Date.now() / 1000)}:F>
-          `.trim();
-
-          try {
-            const sentMessage = await tradeChannel.send(tradeMessage);
-            await sentMessage.react('✅');
-            await sentMessage.react('🎉');
-            await sentMessage.react('💰');
-          } catch (err) {
-            console.error('Error sending trade log:', err);
-          }
+          const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
+          const tradeEmbed = new EmbedBuilder()
+            .setColor('#00FF7F')
+            .setTitle('✅ Trade Completed')
+            .setDescription(`**Item:** ${item.name}\n**Game:** ${item.gameCategory || 'N/A'}\n**Price:** ${item.price}\n**Seller:** ${seller ? seller : `<@${sellerId}>`}\n**Buyer:** ${interaction.user}\n\n**Remaining Stock:** ${item.stock}`)
+            .setTimestamp();
+          await tradeChannel.send({ embeds: [tradeEmbed] });
         }
       }
-
-      // Send to done log channel
-      const doneChannelId = doneChannels.get(interaction.guild.id);
-      if (doneChannelId) {
-        const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
-        if (doneChannel) {
-          const doneMessage = `
-╔═══════════════════════════════════╗
-║   🎉 **𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗗𝗘𝗟𝗜𝗩𝗘𝗥𝗘𝗗**   ║
-╚═══════════════════════════════════╝
-
-🎮 **𝗚𝗔𝗠𝗘:** \`${item.gameCategory || 'N/A'}\`
-📦 **𝗜𝗧𝗘𝗠:** \`${item.name}\`
-💵 **𝗔𝗠𝗢𝗨𝗡𝗧:** \`${item.price}\`
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-👤 **𝗦𝗘𝗟𝗟𝗘𝗥:** <@${sellerId}>
-🛒 **𝗖𝗨𝗦𝗧𝗢𝗠𝗘𝗥:** <@${buyerId}>
-✅ **𝗖𝗢𝗡𝗙𝗜𝗥𝗠𝗘𝗗 𝗕𝗬:** ${interaction.user}
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-✅ **𝗦𝗧𝗔𝗧𝗨𝗦:** Transaction Completed Successfully
-⏰ **𝗧𝗜𝗠𝗘:** <t:${Math.floor(Date.now() / 1000)}:R>
-          `.trim();
-
-          try {
-            const sentMessage = await doneChannel.send(doneMessage);
-            await sentMessage.react('✅');
-            await sentMessage.react('🎊');
-            await sentMessage.react('⭐');
-          } catch (err) {
-            console.error('Error sending done log:', err);
-          }
-        }
-      }
-
-      try {
-        await interaction.editReply({ 
-          content: `✅ **Transaction confirmed by ${interaction.user}!**\n\n🛍️ Item: **${item.name}**\n📦 Remaining Stock: **${item.stock}**\n\n🔒 Closing in 5 seconds...`, 
-          embeds: [],
-          components: [] 
-        }).catch(() => {});
-      } catch (err) {
-        console.error('Error updating message:', err);
-      }
-
+      await interaction.update({ content: `✅ Trade done! Stock: **${item.stock}**. Closing in 5 seconds...`, components: [] });
       setTimeout(async () => {
-        const ticketId = interaction.channel.id;
-        const createdChannels = ticketChannels.get(ticketId) || [];
-        for (const channelId of createdChannels) {
-          const channelToDelete = interaction.guild.channels.cache.get(channelId);
-          if (channelToDelete) await channelToDelete.delete().catch(console.error);
-        }
-        ticketChannels.delete(ticketId);
-        ticketOwners.delete(ticketId);
-        await saveData();
         await interaction.channel.delete().catch(console.error);
       }, 5000);
     }
-
-    // ========== SHOP CANCEL DONE ==========
-
-    if (interaction.customId === 'shop_cancel_done') {
-      await interaction.update({ 
-        content: `❌ **${interaction.user}** cancelled.\n\nTransaction not complete yet.`, 
-        embeds: [],
-        components: [] 
-      });
-    }
-
-    // ========== SHOP ADMIN DENY ==========
-
-    if (interaction.customId === 'shop_admin_deny') {
-      const isOwner = interaction.user.id === OWNER_ID;
-      const admins = adminUsers.get(interaction.guild.id) || [];
-      const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-
-      await interaction.update({ 
-        content: `❌ **Denied by ${interaction.user}.**\n\nTransaction not verified yet.`, 
-        embeds: [],
-        components: [] 
-      });
-    }
+  }
 
   // ==================== MODAL SUBMISSIONS ====================
 
@@ -1787,53 +1248,28 @@ ${serviceDescription}
       shopListings.set(interaction.guild.id, guildShops);
       await saveData();
 
-      // Send beautiful confirmation
-      const confirmEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setAuthor({ name: '✅ Item Added Successfully!', iconURL: interaction.user.displayAvatarURL() })
-        .setTitle(itemName)
-        .setDescription('Your item has been added to the shop and is now available for purchase!')
-        .addFields(
-          { name: '🎮 Game Category', value: `\`\`\`${gameCategory}\`\`\``, inline: true },
-          { name: '💰 Price', value: `\`\`\`${itemPrice}\`\`\``, inline: true },
-          { name: '📦 Stock', value: `\`\`\`${itemStock}\`\`\``, inline: true }
-        )
-        .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-        .setFooter({ text: 'Shop Management System' })
-        .setTimestamp();
-
-      interaction.reply({ embeds: [confirmEmbed], ephemeral: true });
-
       const newsChannelId = shopNews.get(interaction.guild.id);
       if (newsChannelId) {
         const newsChannel = interaction.guild.channels.cache.get(newsChannelId);
         if (newsChannel) {
           const newsEmbed = new EmbedBuilder()
-            .setColor('#FFD700')
-            .setAuthor({ name: '🆕 NEW ITEM IN SHOP!', iconURL: interaction.guild.iconURL() })
-            .setTitle(`✨ ${itemName} ✨`)
-            .setDescription('🎉 **Fresh addition to our shop!** Check it out now!')
-            .addFields(
-              { name: '🎮 Game', value: `**${gameCategory}**`, inline: true },
-              { name: '💰 Price', value: `**${itemPrice}**`, inline: true },
-              { name: '📦 Stock', value: `**${itemStock}** available`, inline: true },
-              { name: '👤 Seller', value: `${interaction.user}`, inline: false }
-            )
+            .setColor('#00FF00')
+            .setTitle('🆕 New Item Added to Shop!')
+            .setDescription(`**${itemName}** is now available!\n\n🎮 **Game:** ${gameCategory}\n💰 **Price:** ${itemPrice}\n📦 **Stock:** ${itemStock}\n👤 **Seller:** ${interaction.user}`)
             .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-            .setImage(interaction.guild.bannerURL({ size: 1024 }))
-            .setFooter({ text: '🛒 Use !shop to browse all items' })
-            .setTimestamp();
+            .setTimestamp()
+            .setFooter({ text: 'Shop System' });
 
           try {
             const sentMessage = await newsChannel.send({ embeds: [newsEmbed] });
             await sentMessage.react('🛍️');
-            await sentMessage.react('✨');
-            await sentMessage.react('🔥');
           } catch (err) {
             console.error('Error sending to shop news channel:', err);
           }
         }
       }
+
+      interaction.reply({ content: `✅ Added **${itemName}** to **${gameCategory}** for **${itemPrice}** with **${itemStock}** stock!`, ephemeral: true });
     }
 
     // ========== SHOP CHANGE MODAL ==========
@@ -1848,62 +1284,13 @@ ${serviceDescription}
       let userItems = guildShops.get(interaction.user.id) || [];
       const itemIndex = userItems.findIndex(i => i.id === itemId);
       if (itemIndex === -1) return interaction.reply({ content: '❌ Not found!', ephemeral: true });
-
-      const oldItem = { ...userItems[itemIndex] };
       userItems[itemIndex].name = itemName;
       userItems[itemIndex].price = itemPrice;
       userItems[itemIndex].stock = itemStock;
-
       guildShops.set(interaction.user.id, userItems);
       shopListings.set(interaction.guild.id, guildShops);
       await saveData();
-
-      // Send beautiful update confirmation
-      const updateEmbed = new EmbedBuilder()
-        .setColor('#5865F2')
-        .setAuthor({ name: '✏️ Item Updated Successfully!', iconURL: interaction.user.displayAvatarURL() })
-        .setTitle(itemName)
-        .setDescription('Your item details have been updated!')
-        .addFields(
-          { name: '🎮 Game', value: `${userItems[itemIndex].gameCategory || 'N/A'}`, inline: true },
-          { name: '💰 Price', value: `~~${oldItem.price}~~ → **${itemPrice}**`, inline: true },
-          { name: '📦 Stock', value: `~~${oldItem.stock}~~ → **${itemStock}**`, inline: true }
-        )
-        .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-        .setFooter({ text: 'Shop Management System' })
-        .setTimestamp();
-
-      interaction.reply({ embeds: [updateEmbed], ephemeral: true });
-
-      // Send to news channel if stock increased significantly
-      const newsChannelId = shopNews.get(interaction.guild.id);
-      if (newsChannelId && itemStock > oldItem.stock + 5) {
-        const newsChannel = interaction.guild.channels.cache.get(newsChannelId);
-        if (newsChannel) {
-          const newsEmbed = new EmbedBuilder()
-            .setColor('#00BFFF')
-            .setAuthor({ name: '📈 STOCK RESTOCKED!', iconURL: interaction.guild.iconURL() })
-            .setTitle(`${itemName}`)
-            .setDescription(`🔥 **Big restock alert!** More stock available now!`)
-            .addFields(
-              { name: '🎮 Game', value: `**${userItems[itemIndex].gameCategory || 'N/A'}**`, inline: true },
-              { name: '💰 Price', value: `**${itemPrice}**`, inline: true },
-              { name: '📦 New Stock', value: `**${itemStock}** available`, inline: true },
-              { name: '👤 Seller', value: `${interaction.user}`, inline: false }
-            )
-            .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-            .setFooter({ text: '🛒 Get it before it runs out!' })
-            .setTimestamp();
-
-          try {
-            const sentMessage = await newsChannel.send({ embeds: [newsEmbed] });
-            await sentMessage.react('🔥');
-            await sentMessage.react('📈');
-          } catch (err) {
-            console.error('Error sending to shop news channel:', err);
-          }
-        }
-      }
+      interaction.reply({ content: `✅ Updated **${itemName}** - Price: **${itemPrice}**, Stock: **${itemStock}**`, ephemeral: true });
     }
   }
 
@@ -2058,43 +1445,15 @@ ${serviceDescription}
         for (const adminId of admins) {
           await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         }
-
-        // Store buyer ID for this shop ticket
-        ticketOwners.set(ticketChannel.id, buyer.id);
-        await saveData();
-
-        const doneButton = new ButtonBuilder()
-          .setCustomId(`shop_buyer_done_${sellerId}_${itemId}`)
-          .setLabel('Mark as Done')
-          .setEmoji('✅')
-          .setStyle(ButtonStyle.Success);
-
-        const closeButton = new ButtonBuilder()
-          .setCustomId('close_ticket')
-          .setLabel('Close')
-          .setEmoji('🔒')
-          .setStyle(ButtonStyle.Danger);
-
+        const doneButton = new ButtonBuilder().setCustomId(`shop_trade_done_${sellerId}_${itemId}`).setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
+        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
-
         const itemEmbed = new EmbedBuilder()
           .setColor('#FFD700')
           .setTitle('🛍️ Shop Transaction')
           .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n🎮 **Game:** ${item.gameCategory || 'N/A'}\n**Item:** ${item.name}\n**Price:** ${item.price}\n**Stock:** ${item.stock}`)
           .setTimestamp();
-
-        const instructionEmbed = new EmbedBuilder()
-          .setColor('#00BFFF')
-          .setTitle('📋 Transaction Instructions')
-          .setDescription(`**${buyer}**, please follow these steps:\n\n1️⃣ Complete the transaction with <@${sellerId}>\n2️⃣ Once you receive the item, click **"Mark as Done"**\n3️⃣ Admin will confirm the completion\n4️⃣ Ticket will close automatically\n\n⚠️ **Important:** Only the buyer can mark as done!`)
-          .setFooter({ text: 'Click "Mark as Done" when transaction is complete' });
-
-        await ticketChannel.send({ 
-          content: `${buyer} <@${sellerId}>`, 
-          embeds: [itemEmbed, instructionEmbed], 
-          components: [row] 
-        });
-
+        await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
         interaction.update({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, components: [] });
       } catch (err) {
         console.error('Shop Ticket Error:', err);
