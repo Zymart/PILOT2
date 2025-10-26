@@ -69,504 +69,6 @@ async function saveData() {
   const data = {
     ticketCategories: Object.fromEntries(ticketCategories),
     orderChannels: Object.fromEntries(orderChannels),
-    doneChannels: Object.fromEntries(doneChannels),
-    adminUsers: Object.fromEntries(adminUsers),
-    ticketChannels: Object.fromEntries(ticketChannels),
-    webCategories: Object.fromEntries(webCategories),
-    shopListings: Object.fromEntries(
-      Array.from(shopListings.entries()).map(([guildId, userMap]) => [
-        guildId,
-        Object.fromEntries(userMap)
-      ])
-    ),
-    ticketOwners: Object.fromEntries(ticketOwners),
-    shopCategories: Object.fromEntries(shopCategories),
-    transcriptChannels: Object.fromEntries(transcriptChannels),
-    tradeChannels: Object.fromEntries(tradeChannels),
-    shopNews: Object.fromEntries(shopNews),
-    gameCategories: Object.fromEntries(gameCategories)
-  };
-
-  return new Promise((resolve) => {
-    const jsonData = JSON.stringify(data);
-    const options = {
-      hostname: 'api.jsonbin.io',
-      path: `/v3/b/${JSONBIN_BIN_ID}`,
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-        'X-Master-Key': JSONBIN_API_KEY,
-        'Content-Length': Buffer.byteLength(jsonData)
-      }
-    };
-
-    const req = https.request(options, (res) => {
-      let responseData = '';
-      res.on('data', (chunk) => responseData += chunk);
-      res.on('end', () => {
-        if (res.statusCode === 200) {
-          console.log('💾 Data saved to cloud');
-        } else {
-          console.error('❌ Failed to save data:', res.statusCode);
-        }
-        resolve();
-      });
-    });
-
-    req.on('error', (err) => {
-      console.error('Error saving data:', err.message);
-      resolve();
-    });
-
-    req.write(jsonData);
-    req.end();
-  });
-}
-
-function parseData(data) {
-  return {
-    ticketCategories: new Map(Object.entries(data.ticketCategories || {})),
-    orderChannels: new Map(Object.entries(data.orderChannels || {})),
-    doneChannels: new Map(Object.entries(data.doneChannels || {})),
-    adminUsers: new Map(Object.entries(data.adminUsers || {}).map(([k, v]) => [k, v || []])),
-    ticketChannels: new Map(Object.entries(data.ticketChannels || {}).map(([k, v]) => [k, v || []])),
-    webCategories: new Map(Object.entries(data.webCategories || {})),
-    shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
-    ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
-    shopCategories: new Map(Object.entries(data.shopCategories || {})),
-    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
-    tradeChannels: new Map(Object.entries(data.tradeChannels || {})),
-    shopNews: new Map(Object.entries(data.shopNews || {})),
-    gameCategories: new Map(Object.entries(data.gameCategories || {}).map(([k, v]) => [k, v || []]))
-  };
-}
-
-function getEmptyData() {
-  return {
-    ticketCategories: new Map(),
-    orderChannels: new Map(),
-    doneChannels: new Map(),
-    adminUsers: new Map(),
-    ticketChannels: new Map(),
-    webCategories: new Map(),
-    shopListings: new Map(),
-    ticketOwners: new Map(),
-    shopCategories: new Map(),
-    transcriptChannels: new Map(),
-    tradeChannels: new Map(),
-    shopNews: new Map(),
-    gameCategories: new Map()
-  };
-}
-
-// Global data maps
-let ticketCategories = new Map();
-let orderChannels = new Map();
-let doneChannels = new Map();
-let adminUsers = new Map();
-let ticketChannels = new Map();
-let webCategories = new Map();
-let shopListings = new Map();
-let ticketOwners = new Map();
-let shopCategories = new Map();
-let transcriptChannels = new Map();
-let tradeChannels = new Map();
-let shopNews = new Map();
-let gameCategories = new Map();
-
-// ==================== BOT READY ====================
-
-client.once('ready', async () => {
-  console.log(`✅ Bot is online as ${client.user.tag}`);
-  const loadedData = await loadData();
-  ticketCategories = loadedData.ticketCategories;
-  orderChannels = loadedData.orderChannels;
-  doneChannels = loadedData.doneChannels;
-  adminUsers = loadedData.adminUsers;
-  ticketChannels = loadedData.ticketChannels;
-  webCategories = loadedData.webCategories;
-  shopListings = loadedData.shopListings;
-  ticketOwners = loadedData.ticketOwners;
-  shopCategories = loadedData.shopCategories;
-  transcriptChannels = loadedData.transcriptChannels;
-  tradeChannels = loadedData.tradeChannels;
-  shopNews = loadedData.shopNews || new Map();
-  gameCategories = loadedData.gameCategories || new Map();
-  console.log('✅ Data loaded from cloud storage');
-
-  setInterval(async () => {
-    await cleanupOrphanedData();
-  }, 3600000);
-});
-
-async function cleanupOrphanedData() {
-  console.log('🧹 Running cleanup...');
-  let cleaned = false;
-
-  for (const [ticketId, channels] of ticketChannels.entries()) {
-    const guild = client.guilds.cache.find(g => g.channels.cache.has(ticketId));
-    if (!guild) {
-      ticketChannels.delete(ticketId);
-      ticketOwners.delete(ticketId);
-      cleaned = true;
-      console.log(`🗑️ Removed orphaned ticket ${ticketId}`);
-    }
-  }
-
-  for (const [guildId, shops] of shopListings.entries()) {
-    const guild = client.guilds.cache.get(guildId);
-    if (!guild) {
-      shopListings.delete(guildId);
-      cleaned = true;
-      console.log(`🗑️ Removed shop data for deleted guild ${guildId}`);
-      continue;
-    }
-
-    for (const [userId, items] of shops.entries()) {
-      const member = await guild.members.fetch(userId).catch(() => null);
-      if (!member) {
-        shops.delete(userId);
-        cleaned = true;
-        console.log(`🗑️ Removed shop items for user ${userId} who left`);
-      }
-    }
-  }
-
-  if (cleaned) {
-    await saveData();
-    console.log('✅ Cleanup complete');
-  } else {
-    console.log('✅ No cleanup needed');
-  }
-}
-
-// ==================== MESSAGE COMMANDS ====================
-
-client.on('messageCreate', async (message) => {
-  if (message.author.bot) return;
-  if (!message.content.startsWith(PREFIX)) return;
-
-  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
-  const command = args.shift().toLowerCase();
-
-  const isOwner = message.author.id === OWNER_ID;
-  const admins = adminUsers.get(message.guild.id) || [];
-  const isAdmin = admins.includes(message.author.id);
-  const canUseCommands = isOwner || isAdmin;
-
-  // ========== ADMIN MANAGEMENT ==========
-
-  if (command === 'admadm') {
-    if (!isOwner) return message.reply('❌ Only the owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const userId = args[0];
-    if (!userId) return message.reply('Usage: `!admadm USER_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const guildAdmins = adminUsers.get(message.guild.id) || [];
-    if (guildAdmins.includes(userId)) return message.reply('❌ This user is already an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    guildAdmins.push(userId);
-    adminUsers.set(message.guild.id, guildAdmins);
-    saveData();
-    const user = await client.users.fetch(userId).catch(() => null);
-    message.reply(`✅ Added **${user ? user.tag : userId}** as admin!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'admrem') {
-    if (!isOwner) return message.reply('❌ Only the owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const userId = args[0];
-    if (!userId) return message.reply('Usage: `!admrem USER_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const guildAdmins = adminUsers.get(message.guild.id) || [];
-    const index = guildAdmins.indexOf(userId);
-    if (index === -1) return message.reply('❌ This user is not an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    guildAdmins.splice(index, 1);
-    adminUsers.set(message.guild.id, guildAdmins);
-    saveData();
-    const user = await client.users.fetch(userId).catch(() => null);
-    message.reply(`✅ Removed **${user ? user.tag : userId}** from admins!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'admlist') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const guildAdmins = adminUsers.get(message.guild.id) || [];
-    if (guildAdmins.length === 0) return message.reply('📋 No admins added yet!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    let adminList = '📋 **Admin List:**\n\n';
-    for (const userId of guildAdmins) {
-      const user = await client.users.fetch(userId).catch(() => null);
-      adminList += `• ${user ? user.tag : userId} (${userId})\n`;
-    }
-    message.reply(adminList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
-    message.delete().catch(() => {});
-  }
-
-  // Permission check for other commands
-  if (!canUseCommands && command !== 'admadm' && command !== 'admrem' && command !== 'admlist') {
-    const hasModerator = message.member.roles.cache.some(r => 
-      r.name.toLowerCase().includes('moderator') || 
-      r.name.toLowerCase().includes('mod') ||
-      r.permissions.has(PermissionFlagsBits.Administrator)
-    );
-    if (!hasModerator) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-  }
-
-  // ========== GAME CATEGORY MANAGEMENT ==========
-
-  if (command === 'addgame') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const gameName = args.join(' ');
-    if (!gameName) return message.reply('Usage: `!addgame Game Name`\nExample: `!addgame Anime Vanguard`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
-    const guildGames = gameCategories.get(message.guild.id) || [];
-    if (guildGames.includes(gameName)) {
-      return message.reply(`❌ **${gameName}** already exists!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    guildGames.push(gameName);
-    gameCategories.set(message.guild.id, guildGames);
-    await saveData();
-    message.reply(`✅ Added game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'removegame') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const gameName = args.join(' ');
-    if (!gameName) return message.reply('Usage: `!removegame Game Name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
-    const guildGames = gameCategories.get(message.guild.id) || [];
-    const index = guildGames.indexOf(gameName);
-    if (index === -1) {
-      return message.reply(`❌ **${gameName}** not found!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    guildGames.splice(index, 1);
-    gameCategories.set(message.guild.id, guildGames);
-    await saveData();
-    message.reply(`✅ Removed game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'listgames') {
-    const guildGames = gameCategories.get(message.guild.id) || [];
-    if (guildGames.length === 0) {
-      return message.reply('📋 No game categories yet! Use `!addgame Game Name` to add one.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    }
-
-    let gameList = '🎮 **Game Categories:**\n\n';
-    guildGames.forEach((game, index) => {
-      gameList += `${index + 1}. ${game}\n`;
-    });
-    message.reply(gameList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
-    message.delete().catch(() => {});
-  }
-
-  // ========== EMBED COMMANDS ==========
-
-  if (command === 'embed') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!embed Your message here`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor('#5865F2')
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: `Designed by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('✨');
-    } catch (err) {
-      console.error(err);
-      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-  }
-
-  if (command === 'fancy') {
-    const fullText = args.join(' ');
-    if (!fullText) return message.reply('Usage: `!fancy Title\nYour message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const lines = fullText.split('\n');
-    const title = lines[0];
-    const text = lines.slice(1).join('\n');
-    const embed = new EmbedBuilder()
-      .setColor('#FF00FF')
-      .setTitle(`✨ ${title} ✨`)
-      .setTimestamp()
-      .setFooter({ text: message.author.username, iconURL: message.author.displayAvatarURL() })
-      .setThumbnail(message.author.displayAvatarURL());
-    if (text.trim()) embed.setDescription(`>>> ${text}`);
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('💖');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'announce') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!announce Your announcement`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor('#FFA500')
-      .setTitle('📢 ANNOUNCEMENT')
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: `Announced by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('📢');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'quote') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!quote Your quote`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor('#2F3136')
-      .setDescription(`*"${text}"*`)
-      .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
-      .setTimestamp();
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('💬');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'colorembed') {
-    const color = args[0];
-    const text = args.slice(1).join(' ');
-    if (!color || !text) return message.reply('Usage: `!colorembed #FF0000 Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor(color)
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: message.author.username, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-      message.reply('❌ Invalid color!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-  }
-
-  if (command === 'success') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!success Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder().setColor('#00FF00').setTitle('✅ Success').setDescription(text).setTimestamp();
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'error') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!error Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder().setColor('#FF0000').setTitle('❌ Error').setDescription(text).setTimestamp();
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'info') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!info Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder().setColor('#00BFFF').setTitle('ℹ️ Information').setDescription(text).setTimestamp();
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'auto') {
-    let text = args.join(' ');
-    if (!text) return message.reply('Usage: `!auto Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const fancyFont = (str) => {
-      const normal = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      const fancy = '𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵';
-      return str.split('').map(char => {
-        const index = normal.indexOf(char);
-        return index !== -1 ? fancy[index] : char;
-      }).join('');
-    };
-    text = fancyFont(text);
-    const lines = text.split('\n');
-    const processedLines = lines.map(line => {
-      const l = line.toLowerCase();
-      if (l.includes('service') || l.includes('offer')) return `💸 ${line}`;
-      if (l.includes('pilot')) return `✈️ ${line}`;
-      if (l.includes('broly') || l.includes('strong')) return `💪 ${line}`;
-      if (l.includes('goku') || l.includes('fire')) return `🔥 ${line}`;
-      if (l.includes('vegeta') || l.includes('power')) return `⚡ ${line}`;
-      if (l.includes('php') || l.includes('price') || l.includes('=')) return `💰 ${line}`;
-      if (l.includes('diamond') || l.includes('rare')) return `💎 ${line}`;
-      if (l.includes('premium') || l.includes('vip')) return `👑 ${line}`;
-      if (l.includes('rank') || l.includes('top')) return `🏆 ${line}`;
-      if (l.includes('boost')) return `🚀 ${line}`;
-      if (l.includes('new')) return `🆕 ${line}`;
-      if (l.includes('sale') || l.includes('hot')) return `🔥 ${line}`;
-      if (l.includes('discount')) return `💥 ${line}`;
-      return `✨ ${line}`;
-    });
-    text = processedLines.join('\n');
-    const embed = new EmbedBuilder()
-      .setColor('#FF6B9D')
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: `Styled by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('✨');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  // ========== CONFIGURATION COMMANDS ==========
-
-  if (command === 'concategory') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const categoryId = args[0];
-    if (!categoryId) return message.reply('Usage: `!concategory CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const category = message.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    ticketCategories.set(message.guild.id, categoryId);
-    saveData();
-    message.reply(`✅ Ticket category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'conweb') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const categoryId = args[0];
-    if (!categoryId) return message.reply('Usage: `!conweb CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const category = message.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    webCategories.set(message.guild.id, categoryId);
-    saveData();
-    message.reply(`✅ Webhook category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'conorders') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!conorders CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     doneChannels.set(message.guild.id, channelId);
     saveData();
     message.reply(`✅ Done log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
@@ -932,9 +434,9 @@ ${serviceDescription}
       .setDescription('**All available commands and features**')
       .addFields(
         { name: '📝 Embed Commands', value: '`!embed <msg>` - Basic embed\n`!auto <msg>` - Auto-styled embed\n`!fancy <title>\\n<msg>` - Fancy embed\n`!announce <msg>` - Announcement\n`!quote <msg>` - Quote style\n`!colorembed #HEX <msg>` - Custom color\n`!success <msg>` - Success message\n`!error <msg>` - Error message\n`!info <msg>` - Info message', inline: false },
-        { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Owner marks as done\n`!forcedone` - Admin force complete\n`!close` - Close without log\n`!createweb <name>` - Create webhook channel', inline: false },
+        { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Owner marks as done\n`!forcedone` - Admin force complete\n`!close` - Close without log\n`!createweb <n>` - Create webhook channel', inline: false },
         { name: '🛒 Shop System', value: '`!shop` - Create shop panel\n`!stock +/- <amount> <user_id> <item>` - Manage stock\nExample: `!stock + 10 123456 Sword`', inline: false },
-        { name: '🎮 Game Categories', value: '`!addgame <name>` - Add game category\n`!removegame <name>` - Remove game\n`!listgames` - List all games\nExample: `!addgame Anime Vanguard`', inline: false },
+        { name: '🎮 Game Categories', value: '`!addgame <n>` - Add game category\n`!removegame <n>` - Remove game\n`!listgames` - List all games\nExample: `!addgame Anime Vanguard`', inline: false },
         { name: '⚙️ Configuration (Admin Only)', value: '`!concategory <id>` - Set ticket category\n`!conweb <id>` - Set webhook category\n`!conorders <id>` - Set orders log\n`!condone <id>` - Set done log\n`!conshop <id>` - Set shop category\n`!contrade <id>` - Set trade log\n`!contranscript <id>` - Set transcript log\n`!connews <id>` - Set shop news channel', inline: false },
         { name: '👑 Admin Management (Owner Only)', value: '`!admadm <user_id>` - Add admin\n`!admrem <user_id>` - Remove admin\n`!admlist` - List all admins', inline: false },
         { name: '✨ Features', value: '✅ Game-based categories\n✅ Anti-duplicate tickets\n✅ 3-step shop verification\n✅ Stock management\n✅ Auto shop news\n✅ Trade logging\n✅ Auto message cleanup\n✅ Webhook integration', inline: false }
@@ -1697,7 +1199,503 @@ ${serviceDescription}
 
 // ==================== BOT LOGIN ====================
 
-client.login(process.env.TOKEN);
+client.login(process.env.TOKEN);: Object.fromEntries(doneChannels),
+    adminUsers: Object.fromEntries(adminUsers),
+    ticketChannels: Object.fromEntries(ticketChannels),
+    webCategories: Object.fromEntries(webCategories),
+    shopListings: Object.fromEntries(
+      Array.from(shopListings.entries()).map(([guildId, userMap]) => [
+        guildId,
+        Object.fromEntries(userMap)
+      ])
+    ),
+    ticketOwners: Object.fromEntries(ticketOwners),
+    shopCategories: Object.fromEntries(shopCategories),
+    transcriptChannels: Object.fromEntries(transcriptChannels),
+    tradeChannels: Object.fromEntries(tradeChannels),
+    shopNews: Object.fromEntries(shopNews),
+    gameCategories: Object.fromEntries(gameCategories)
+  };
+
+  return new Promise((resolve) => {
+    const jsonData = JSON.stringify(data);
+    const options = {
+      hostname: 'api.jsonbin.io',
+      path: `/v3/b/${JSONBIN_BIN_ID}`,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': JSONBIN_API_KEY,
+        'Content-Length': Buffer.byteLength(jsonData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      let responseData = '';
+      res.on('data', (chunk) => responseData += chunk);
+      res.on('end', () => {
+        if (res.statusCode === 200) {
+          console.log('💾 Data saved to cloud');
+        } else {
+          console.error('❌ Failed to save data:', res.statusCode);
+        }
+        resolve();
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Error saving data:', err.message);
+      resolve();
+    });
+
+    req.write(jsonData);
+    req.end();
+  });
+}
+
+function parseData(data) {
+  return {
+    ticketCategories: new Map(Object.entries(data.ticketCategories || {})),
+    orderChannels: new Map(Object.entries(data.orderChannels || {})),
+    doneChannels: new Map(Object.entries(data.doneChannels || {})),
+    adminUsers: new Map(Object.entries(data.adminUsers || {}).map(([k, v]) => [k, v || []])),
+    ticketChannels: new Map(Object.entries(data.ticketChannels || {}).map(([k, v]) => [k, v || []])),
+    webCategories: new Map(Object.entries(data.webCategories || {})),
+    shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
+    ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
+    shopCategories: new Map(Object.entries(data.shopCategories || {})),
+    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
+    tradeChannels: new Map(Object.entries(data.tradeChannels || {})),
+    shopNews: new Map(Object.entries(data.shopNews || {})),
+    gameCategories: new Map(Object.entries(data.gameCategories || {}).map(([k, v]) => [k, v || []]))
+  };
+}
+
+function getEmptyData() {
+  return {
+    ticketCategories: new Map(),
+    orderChannels: new Map(),
+    doneChannels: new Map(),
+    adminUsers: new Map(),
+    ticketChannels: new Map(),
+    webCategories: new Map(),
+    shopListings: new Map(),
+    ticketOwners: new Map(),
+    shopCategories: new Map(),
+    transcriptChannels: new Map(),
+    tradeChannels: new Map(),
+    shopNews: new Map(),
+    gameCategories: new Map()
+  };
+}
+
+// Global data maps
+let ticketCategories = new Map();
+let orderChannels = new Map();
+let doneChannels = new Map();
+let adminUsers = new Map();
+let ticketChannels = new Map();
+let webCategories = new Map();
+let shopListings = new Map();
+let ticketOwners = new Map();
+let shopCategories = new Map();
+let transcriptChannels = new Map();
+let tradeChannels = new Map();
+let shopNews = new Map();
+let gameCategories = new Map();
+
+// ==================== BOT READY ====================
+
+client.once('ready', async () => {
+  console.log(`✅ Bot is online as ${client.user.tag}`);
+  const loadedData = await loadData();
+  ticketCategories = loadedData.ticketCategories;
+  orderChannels = loadedData.orderChannels;
+  doneChannels = loadedData.doneChannels;
+  adminUsers = loadedData.adminUsers;
+  ticketChannels = loadedData.ticketChannels;
+  webCategories = loadedData.webCategories;
+  shopListings = loadedData.shopListings;
+  ticketOwners = loadedData.ticketOwners;
+  shopCategories = loadedData.shopCategories;
+  transcriptChannels = loadedData.transcriptChannels;
+  tradeChannels = loadedData.tradeChannels;
+  shopNews = loadedData.shopNews || new Map();
+  gameCategories = loadedData.gameCategories || new Map();
+  console.log('✅ Data loaded from cloud storage');
+
+  setInterval(async () => {
+    await cleanupOrphanedData();
+  }, 3600000);
+});
+
+async function cleanupOrphanedData() {
+  console.log('🧹 Running cleanup...');
+  let cleaned = false;
+
+  for (const [ticketId, channels] of ticketChannels.entries()) {
+    const guild = client.guilds.cache.find(g => g.channels.cache.has(ticketId));
+    if (!guild) {
+      ticketChannels.delete(ticketId);
+      ticketOwners.delete(ticketId);
+      cleaned = true;
+      console.log(`🗑️ Removed orphaned ticket ${ticketId}`);
+    }
+  }
+
+  for (const [guildId, shops] of shopListings.entries()) {
+    const guild = client.guilds.cache.get(guildId);
+    if (!guild) {
+      shopListings.delete(guildId);
+      cleaned = true;
+      console.log(`🗑️ Removed shop data for deleted guild ${guildId}`);
+      continue;
+    }
+
+    for (const [userId, items] of shops.entries()) {
+      const member = await guild.members.fetch(userId).catch(() => null);
+      if (!member) {
+        shops.delete(userId);
+        cleaned = true;
+        console.log(`🗑️ Removed shop items for user ${userId} who left`);
+      }
+    }
+  }
+
+  if (cleaned) {
+    await saveData();
+    console.log('✅ Cleanup complete');
+  } else {
+    console.log('✅ No cleanup needed');
+  }
+}
+
+// ==================== MESSAGE COMMANDS ====================
+
+client.on('messageCreate', async (message) => {
+  if (message.author.bot) return;
+  if (!message.content.startsWith(PREFIX)) return;
+
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const command = args.shift().toLowerCase();
+
+  const isOwner = message.author.id === OWNER_ID;
+  const admins = adminUsers.get(message.guild.id) || [];
+  const isAdmin = admins.includes(message.author.id);
+  const canUseCommands = isOwner || isAdmin;
+
+  // ========== ADMIN MANAGEMENT ==========
+
+  if (command === 'admadm') {
+    if (!isOwner) return message.reply('❌ Only the owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const userId = args[0];
+    if (!userId) return message.reply('Usage: `!admadm USER_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const guildAdmins = adminUsers.get(message.guild.id) || [];
+    if (guildAdmins.includes(userId)) return message.reply('❌ This user is already an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    guildAdmins.push(userId);
+    adminUsers.set(message.guild.id, guildAdmins);
+    saveData();
+    const user = await client.users.fetch(userId).catch(() => null);
+    message.reply(`✅ Added **${user ? user.tag : userId}** as admin!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'admrem') {
+    if (!isOwner) return message.reply('❌ Only the owner can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const userId = args[0];
+    if (!userId) return message.reply('Usage: `!admrem USER_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const guildAdmins = adminUsers.get(message.guild.id) || [];
+    const index = guildAdmins.indexOf(userId);
+    if (index === -1) return message.reply('❌ This user is not an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    guildAdmins.splice(index, 1);
+    adminUsers.set(message.guild.id, guildAdmins);
+    saveData();
+    const user = await client.users.fetch(userId).catch(() => null);
+    message.reply(`✅ Removed **${user ? user.tag : userId}** from admins!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'admlist') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const guildAdmins = adminUsers.get(message.guild.id) || [];
+    if (guildAdmins.length === 0) return message.reply('📋 No admins added yet!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    let adminList = '📋 **Admin List:**\n\n';
+    for (const userId of guildAdmins) {
+      const user = await client.users.fetch(userId).catch(() => null);
+      adminList += `• ${user ? user.tag : userId} (${userId})\n`;
+    }
+    message.reply(adminList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
+    message.delete().catch(() => {});
+  }
+
+  // Permission check for other commands
+  if (!canUseCommands && command !== 'admadm' && command !== 'admrem' && command !== 'admlist') {
+    const hasModerator = message.member.roles.cache.some(r => 
+      r.name.toLowerCase().includes('moderator') || 
+      r.name.toLowerCase().includes('mod') ||
+      r.permissions.has(PermissionFlagsBits.Administrator)
+    );
+    if (!hasModerator) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+  }
+
+  // ========== GAME CATEGORY MANAGEMENT ==========
+
+  if (command === 'addgame') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!addgame Game Name`\nExample: `!addgame Anime Vanguard`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = gameCategories.get(message.guild.id) || [];
+    if (guildGames.includes(gameName)) {
+      return message.reply(`❌ **${gameName}** already exists!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    guildGames.push(gameName);
+    gameCategories.set(message.guild.id, guildGames);
+    await saveData();
+    message.reply(`✅ Added game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'removegame') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!removegame Game Name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = gameCategories.get(message.guild.id) || [];
+    const index = guildGames.indexOf(gameName);
+    if (index === -1) {
+      return message.reply(`❌ **${gameName}** not found!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    guildGames.splice(index, 1);
+    gameCategories.set(message.guild.id, guildGames);
+    await saveData();
+    message.reply(`✅ Removed game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'listgames') {
+    const guildGames = gameCategories.get(message.guild.id) || [];
+    if (guildGames.length === 0) {
+      return message.reply('📋 No game categories yet! Use `!addgame Game Name` to add one.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    }
+
+    let gameList = '🎮 **Game Categories:**\n\n';
+    guildGames.forEach((game, index) => {
+      gameList += `${index + 1}. ${game}\n`;
+    });
+    message.reply(gameList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
+    message.delete().catch(() => {});
+  }
+
+  // ========== EMBED COMMANDS ==========
+
+  if (command === 'embed') {
+    const text = args.join(' ');
+    if (!text) return message.reply('Usage: `!embed Your message here`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const embed = new EmbedBuilder()
+      .setColor('#5865F2')
+      .setDescription(text)
+      .setTimestamp()
+      .setFooter({ text: `Designed by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
+    try {
+      await message.delete();
+      const sentMessage = await message.channel.send({ embeds: [embed] });
+      await sentMessage.react('✨');
+    } catch (err) {
+      console.error(err);
+      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+  }
+
+  if (command === 'fancy') {
+    const fullText = args.join(' ');
+    if (!fullText) return message.reply('Usage: `!fancy Title\nYour message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const lines = fullText.split('\n');
+    const title = lines[0];
+    const text = lines.slice(1).join('\n');
+    const embed = new EmbedBuilder()
+      .setColor('#FF00FF')
+      .setTitle(`✨ ${title} ✨`)
+      .setTimestamp()
+      .setFooter({ text: message.author.username, iconURL: message.author.displayAvatarURL() })
+      .setThumbnail(message.author.displayAvatarURL());
+    if (text.trim()) embed.setDescription(`>>> ${text}`);
+    try {
+      await message.delete();
+      const sentMessage = await message.channel.send({ embeds: [embed] });
+      await sentMessage.react('💖');
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (command === 'announce') {
+    const text = args.join(' ');
+    if (!text) return message.reply('Usage: `!announce Your announcement`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const embed = new EmbedBuilder()
+      .setColor('#FFA500')
+      .setTitle('📢 ANNOUNCEMENT')
+      .setDescription(text)
+      .setTimestamp()
+      .setFooter({ text: `Announced by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
+    try {
+      await message.delete();
+      const sentMessage = await message.channel.send({ embeds: [embed] });
+      await sentMessage.react('📢');
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (command === 'quote') {
+    const text = args.join(' ');
+    if (!text) return message.reply('Usage: `!quote Your quote`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const embed = new EmbedBuilder()
+      .setColor('#2F3136')
+      .setDescription(`*"${text}"*`)
+      .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
+      .setTimestamp();
+    try {
+      await message.delete();
+      const sentMessage = await message.channel.send({ embeds: [embed] });
+      await sentMessage.react('💬');
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (command === 'colorembed') {
+    const color = args[0];
+    const text = args.slice(1).join(' ');
+    if (!color || !text) return message.reply('Usage: `!colorembed #FF0000 Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const embed = new EmbedBuilder()
+      .setColor(color)
+      .setDescription(text)
+      .setTimestamp()
+      .setFooter({ text: message.author.username, iconURL: message.author.displayAvatarURL() });
+    try {
+      await message.delete();
+      await message.channel.send({ embeds: [embed] });
+    } catch (err) {
+      console.error(err);
+      message.reply('❌ Invalid color!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+  }
+
+  if (command === 'success') {
+    const text = args.join(' ');
+    if (!text) return message.reply('Usage: `!success Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const embed = new EmbedBuilder().setColor('#00FF00').setTitle('✅ Success').setDescription(text).setTimestamp();
+    try {
+      await message.delete();
+      await message.channel.send({ embeds: [embed] });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (command === 'error') {
+    const text = args.join(' ');
+    if (!text) return message.reply('Usage: `!error Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const embed = new EmbedBuilder().setColor('#FF0000').setTitle('❌ Error').setDescription(text).setTimestamp();
+    try {
+      await message.delete();
+      await message.channel.send({ embeds: [embed] });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (command === 'info') {
+    const text = args.join(' ');
+    if (!text) return message.reply('Usage: `!info Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const embed = new EmbedBuilder().setColor('#00BFFF').setTitle('ℹ️ Information').setDescription(text).setTimestamp();
+    try {
+      await message.delete();
+      await message.channel.send({ embeds: [embed] });
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  if (command === 'auto') {
+    let text = args.join(' ');
+    if (!text) return message.reply('Usage: `!auto Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const fancyFont = (str) => {
+      const normal = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+      const fancy = '𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵';
+      return str.split('').map(char => {
+        const index = normal.indexOf(char);
+        return index !== -1 ? fancy[index] : char;
+      }).join('');
+    };
+    text = fancyFont(text);
+    const lines = text.split('\n');
+    const processedLines = lines.map(line => {
+      const l = line.toLowerCase();
+      if (l.includes('service') || l.includes('offer')) return `💸 ${line}`;
+      if (l.includes('pilot')) return `✈️ ${line}`;
+      if (l.includes('broly') || l.includes('strong')) return `💪 ${line}`;
+      if (l.includes('goku') || l.includes('fire')) return `🔥 ${line}`;
+      if (l.includes('vegeta') || l.includes('power')) return `⚡ ${line}`;
+      if (l.includes('php') || l.includes('price') || l.includes('=')) return `💰 ${line}`;
+      if (l.includes('diamond') || l.includes('rare')) return `💎 ${line}`;
+      if (l.includes('premium') || l.includes('vip')) return `👑 ${line}`;
+      if (l.includes('rank') || l.includes('top')) return `🏆 ${line}`;
+      if (l.includes('boost')) return `🚀 ${line}`;
+      if (l.includes('new')) return `🆕 ${line}`;
+      if (l.includes('sale') || l.includes('hot')) return `🔥 ${line}`;
+      if (l.includes('discount')) return `💥 ${line}`;
+      return `✨ ${line}`;
+    });
+    text = processedLines.join('\n');
+    const embed = new EmbedBuilder()
+      .setColor('#FF6B9D')
+      .setDescription(text)
+      .setTimestamp()
+      .setFooter({ text: `Styled by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
+    try {
+      await message.delete();
+      const sentMessage = await message.channel.send({ embeds: [embed] });
+      await sentMessage.react('✨');
+    } catch (err) {
+      console.error(err);
+    }
+  }
+
+  // ========== CONFIGURATION COMMANDS ==========
+
+  if (command === 'concategory') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const categoryId = args[0];
+    if (!categoryId) return message.reply('Usage: `!concategory CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const category = message.guild.channels.cache.get(categoryId);
+    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    ticketCategories.set(message.guild.id, categoryId);
+    saveData();
+    message.reply(`✅ Ticket category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'conweb') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const categoryId = args[0];
+    if (!categoryId) return message.reply('Usage: `!conweb CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const category = message.guild.channels.cache.get(categoryId);
+    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    webCategories.set(message.guild.id, categoryId);
+    saveData();
+    message.reply(`✅ Webhook category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'conorders') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channelId = args[0];
+    if (!channelId) return message.reply('Usage: `!conorders CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channel = message.guild.channels.cache.get(channelId);
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     orderChannels.set(message.guild.id, channelId);
     saveData();
@@ -1710,3 +1708,5 @@ client.login(process.env.TOKEN);
     const channelId = args[0];
     if (!channelId) return message.reply('Usage: `!condone CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channel = message.guild.channels.cache.get(channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    doneChannels
