@@ -172,7 +172,7 @@ let shopCategories = new Map();
 let transcriptChannels = new Map();
 let tradeChannels = new Map();
 let shopNews = new Map();
-let gameCategories = new Map(); // NEW: Store game categories per guild
+let gameCategories = new Map();
 
 // ==================== BOT READY ====================
 
@@ -567,18 +567,6 @@ client.on('messageCreate', async (message) => {
     if (!channelId) return message.reply('Usage: `!conorders CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channel = message.guild.channels.cache.get(channelId);
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    orderChannels.set(message.guild.id, channelId);
-    saveData();
-    message.reply(`✅ Orders log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'condone') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!condone CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     doneChannels.set(message.guild.id, channelId);
     saveData();
     message.reply(`✅ Done log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
@@ -788,6 +776,101 @@ client.on('messageCreate', async (message) => {
     await message.delete().catch(() => {});
   }
 
+  // ========== FORCE DONE COMMAND ==========
+
+  if (command === 'forcedone') {
+    if (!canUseCommands) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    if (!message.channel.name.startsWith('ticket-')) return message.reply('❌ Only in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const ticketOwnerName = message.channel.name.replace('ticket-', '');
+    const ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
+    let serviceDescription = 'N/A';
+    try {
+      const messages = await message.channel.messages.fetch({ limit: 50 });
+      const messagesArray = Array.from(messages.values()).reverse();
+      for (const msg of messagesArray) {
+        if (msg.content && msg.content.includes('Service Request:')) {
+          const parts = msg.content.split('Service Request:');
+          if (parts.length > 1) {
+            serviceDescription = parts[1].trim().split('\n')[0].trim();
+            break;
+          }
+        }
+      }
+    } catch (err) {
+      console.error('Error fetching service description:', err);
+    }
+
+    const doneChannelId = doneChannels.get(message.guild.id);
+    if (doneChannelId) {
+      const doneChannel = message.guild.channels.cache.get(doneChannelId);
+      if (doneChannel) {
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        const doneMessage = `╔═══════════════════════════════════╗
+║     ✅ 𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗     ║
+╚═══════════════════════════════════╝
+
+🎉 **${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📦 **𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦:**
+${serviceDescription}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 **𝗖𝗨𝗦𝗧𝗢𝗠𝗘𝗥:** ${ticketOwner ? ticketOwner.user : ticketOwnerName}
+✅ **𝗙𝗢𝗥𝗖𝗘𝗗 𝗕𝗬:** ${message.author}
+⏰ **𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗 𝗔𝗧:** <t:${currentTimestamp}:F>`;
+
+        const sentMessage = await doneChannel.send(doneMessage);
+        await sentMessage.react('✅');
+        await sentMessage.react('🎉');
+        await sentMessage.react('⚡');
+      }
+    }
+
+    await message.channel.send(`✅ **Force marked as done by ${message.author}!**\n\nClosing in 5 seconds...`);
+    await message.delete().catch(() => {});
+
+    setTimeout(async () => {
+      const ticketId = message.channel.id;
+      const createdChannels = ticketChannels.get(ticketId) || [];
+      for (const channelId of createdChannels) {
+        const channelToDelete = message.guild.channels.cache.get(channelId);
+        if (channelToDelete) await channelToDelete.delete().catch(console.error);
+      }
+      ticketChannels.delete(ticketId);
+      ticketOwners.delete(ticketId);
+      await saveData();
+      await message.channel.delete().catch(console.error);
+    }, 5000);
+  }
+
+  // ========== CLOSE COMMAND ==========
+
+  if (command === 'close') {
+    if (!canUseCommands) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    if (!message.channel.name.startsWith('ticket-') && !message.channel.name.startsWith('shop-')) return message.reply('❌ Not a ticket!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    await message.channel.send('🔒 **Closing ticket without logging...**\n\nClosing in 5 seconds...');
+    await message.delete().catch(() => {});
+
+    setTimeout(async () => {
+      const ticketId = message.channel.id;
+      const createdChannels = ticketChannels.get(ticketId) || [];
+      for (const channelId of createdChannels) {
+        const channelToDelete = message.guild.channels.cache.get(channelId);
+        if (channelToDelete) await channelToDelete.delete().catch(console.error);
+      }
+      ticketChannels.delete(ticketId);
+      ticketOwners.delete(ticketId);
+      await saveData();
+      await message.channel.delete().catch(console.error);
+    }, 5000);
+  }
+
   // ========== TICKET PANEL ==========
 
   if (command === 'ticket') {
@@ -849,7 +932,7 @@ client.on('messageCreate', async (message) => {
       .setDescription('**All available commands and features**')
       .addFields(
         { name: '📝 Embed Commands', value: '`!embed <msg>` - Basic embed\n`!auto <msg>` - Auto-styled embed\n`!fancy <title>\\n<msg>` - Fancy embed\n`!announce <msg>` - Announcement\n`!quote <msg>` - Quote style\n`!colorembed #HEX <msg>` - Custom color\n`!success <msg>` - Success message\n`!error <msg>` - Error message\n`!info <msg>` - Info message', inline: false },
-        { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Mark ticket as done\n`!createweb <name>` - Create webhook channel', inline: false },
+        { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Owner marks as done\n`!forcedone` - Admin force complete\n`!close` - Close without log\n`!createweb <name>` - Create webhook channel', inline: false },
         { name: '🛒 Shop System', value: '`!shop` - Create shop panel\n`!stock +/- <amount> <user_id> <item>` - Manage stock\nExample: `!stock + 10 123456 Sword`', inline: false },
         { name: '🎮 Game Categories', value: '`!addgame <name>` - Add game category\n`!removegame <name>` - Remove game\n`!listgames` - List all games\nExample: `!addgame Anime Vanguard`', inline: false },
         { name: '⚙️ Configuration (Admin Only)', value: '`!concategory <id>` - Set ticket category\n`!conweb <id>` - Set webhook category\n`!conorders <id>` - Set orders log\n`!condone <id>` - Set done log\n`!conshop <id>` - Set shop category\n`!contrade <id>` - Set trade log\n`!contranscript <id>` - Set transcript log\n`!connews <id>` - Set shop news channel', inline: false },
@@ -1092,25 +1175,28 @@ client.on('interactionCreate', async (interaction) => {
         const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
         if (doneChannel) {
           const currentTimestamp = Math.floor(Date.now() / 1000);
-          const doneEmbed = new EmbedBuilder()
-            .setColor('#00FF7F')
-            .setAuthor({ name: '✅ Service Completed', iconURL: interaction.guild.iconURL() })
-            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!`)
-            .setDescription(`🎉 **Service successfully delivered and confirmed!**\n\n📦 **Service Details:**\n${serviceDescription}`)
-            .addFields(
-              { name: '👤 Customer', value: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, inline: true },
-              { name: '✅ Confirmed By', value: `${interaction.user}`, inline: true },
-              { name: '⏰ Completed At', value: `<t:${currentTimestamp}:F>\n(<t:${currentTimestamp}:R>)`, inline: false }
-            )
-            .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ size: 256 }) : null)
-            .setImage(interaction.user.displayAvatarURL({ size: 512 }))
-            .setFooter({ text: `Admin: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
-            .setTimestamp();
+          const doneMessage = `╔═══════════════════════════════════╗
+║     ✅ 𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗     ║
+╚═══════════════════════════════════╝
+
+🎉 **${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!**
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📦 **𝗦𝗘𝗥𝗩𝗜𝗖𝗘 𝗗𝗘𝗧𝗔𝗜𝗟𝗦:**
+${serviceDescription}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 **𝗖𝗨𝗦𝗧𝗢𝗠𝗘𝗥:** ${ticketOwner ? ticketOwner.user : ticketOwnerName}
+✅ **𝗖𝗢𝗡𝗙𝗜𝗥𝗠𝗘𝗗 𝗕𝗬:** ${interaction.user}
+⏰ **𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗 𝗔𝗧:** <t:${currentTimestamp}:F>`;
 
           try {
-            const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
+            const sentMessage = await doneChannel.send(doneMessage);
             await sentMessage.react('✅');
             await sentMessage.react('🎉');
+            await sentMessage.react('⚡');
             console.log(`✅ Sent done log to channel ${doneChannelId}`);
           } catch (err) {
             console.error('Error sending to done channel:', err);
@@ -1142,37 +1228,160 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
     }
 
-    // ========== SHOP TRADE DONE ==========
+    // ========== SHOP BUYER MARK DONE ==========
 
-    if (interaction.customId.startsWith('shop_trade_done_')) {
-      const parts = interaction.customId.replace('shop_trade_done_', '').split('_');
+    if (interaction.customId.startsWith('shop_buyer_mark_done_')) {
+      const parts = interaction.customId.replace('shop_buyer_mark_done_', '').split('_');
       const sellerId = parts[0];
-      const itemId = parts[1];
+      const buyerId = parts[1];
+      const itemId = parts[2];
+
+      if (interaction.user.id !== buyerId) {
+        return interaction.reply({ content: '❌ Only the buyer can mark as done!', ephemeral: true });
+      }
+
+      const confirmButton = new ButtonBuilder()
+        .setCustomId(`shop_buyer_confirm_${sellerId}_${buyerId}_${itemId}`)
+        .setLabel('Yes, I Received It')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success);
+
+      const cancelButton = new ButtonBuilder()
+        .setCustomId('shop_buyer_cancel')
+        .setLabel('Not Yet')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger);
+
+      const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
+
+      await interaction.update({
+        content: `${interaction.user}\n\n**Did you receive the item?**\nPlease confirm below:`,
+        components: [row]
+      });
+    }
+
+    // ========== SHOP BUYER CONFIRM ==========
+
+    if (interaction.customId.startsWith('shop_buyer_confirm_')) {
+      const parts = interaction.customId.replace('shop_buyer_confirm_', '').split('_');
+      const sellerId = parts[0];
+      const buyerId = parts[1];
+      const itemId = parts[2];
+
+      if (interaction.user.id !== buyerId) {
+        return interaction.reply({ content: '❌ Only the buyer can confirm!', ephemeral: true });
+      }
+
+      const confirmButton = new ButtonBuilder()
+        .setCustomId(`shop_admin_confirm_${sellerId}_${buyerId}_${itemId}`)
+        .setLabel('Confirm Transaction')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success);
+
+      const denyButton = new ButtonBuilder()
+        .setCustomId('shop_admin_deny')
+        .setLabel('Deny')
+        .setEmoji('❌')
+        .setStyle(ButtonStyle.Danger);
+
+      const row = new ActionRowBuilder().addComponents(confirmButton, denyButton);
+
+      await interaction.update({
+        content: `✅ **${interaction.user} confirmed receiving the item!**\n\n**Admins:** Please verify and confirm the transaction.`,
+        components: [row]
+      });
+    }
+
+    // ========== SHOP BUYER CANCEL ==========
+
+    if (interaction.customId === 'shop_buyer_cancel') {
+      await interaction.update({
+        content: `❌ **${interaction.user}** cancelled.\n\nTransaction not completed yet.`,
+        components: []
+      });
+    }
+
+    // ========== SHOP ADMIN CONFIRM ==========
+
+    if (interaction.customId.startsWith('shop_admin_confirm_')) {
+      const isOwner = interaction.user.id === OWNER_ID;
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      const isAdmin = admins.includes(interaction.user.id);
+      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+
+      const parts = interaction.customId.replace('shop_admin_confirm_', '').split('_');
+      const sellerId = parts[0];
+      const buyerId = parts[1];
+      const itemId = parts[2];
+
       const guildShops = shopListings.get(interaction.guild.id) || new Map();
       const sellerItems = guildShops.get(sellerId) || [];
       const item = sellerItems.find(i => i.id === itemId);
+
       if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
+
       item.stock = Math.max(0, (item.stock || 0) - 1);
       guildShops.set(sellerId, sellerItems);
       shopListings.set(interaction.guild.id, guildShops);
       await saveData();
+
       const tradeChannelId = tradeChannels.get(interaction.guild.id);
       if (tradeChannelId) {
         const tradeChannel = interaction.guild.channels.cache.get(tradeChannelId);
         if (tradeChannel) {
           const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
-          const tradeEmbed = new EmbedBuilder()
-            .setColor('#00FF7F')
-            .setTitle('✅ Trade Completed')
-            .setDescription(`**Item:** ${item.name}\n**Game:** ${item.gameCategory || 'N/A'}\n**Price:** ${item.price}\n**Seller:** ${seller ? seller : `<@${sellerId}>`}\n**Buyer:** ${interaction.user}\n\n**Remaining Stock:** ${item.stock}`)
-            .setTimestamp();
-          await tradeChannel.send({ embeds: [tradeEmbed] });
+          const buyer = await interaction.client.users.fetch(buyerId).catch(() => null);
+          const currentTimestamp = Math.floor(Date.now() / 1000);
+
+          const tradeMessage = `╔═══════════════════════════════════╗
+║        ✅ 𝗧𝗥𝗔𝗗𝗘 𝗖𝗢𝗠𝗣𝗟𝗘𝗧𝗘𝗗        ║
+╚═══════════════════════════════════╝
+
+🎮 **𝗚𝗔𝗠𝗘:** \`${item.gameCategory || 'N/A'}\`
+🛍️ **𝗜𝗧𝗘𝗠:** \`${item.name}\`
+💰 **𝗣𝗥𝗜𝗖𝗘:** \`${item.price}\`
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 **𝗦𝗘𝗟𝗟𝗘𝗥:** ${seller ? seller : `<@${sellerId}>`}
+🛒 **𝗕𝗨𝗬𝗘𝗥:** ${buyer ? buyer : `<@${buyerId}>`}
+✅ **𝗖𝗢𝗡𝗙𝗜𝗥𝗠𝗘𝗗 𝗕𝗬:** ${interaction.user}
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📦 **𝗥𝗘𝗠𝗔𝗜𝗡𝗜𝗡𝗚 𝗦𝗧𝗢𝗖𝗞:** \`${item.stock}\`
+
+⏰ <t:${currentTimestamp}:F>`;
+
+          const sentMessage = await tradeChannel.send(tradeMessage);
+          await sentMessage.react('✅');
+          await sentMessage.react('🎉');
+          await sentMessage.react('💰');
         }
       }
-      await interaction.update({ content: `✅ Trade done! Stock: **${item.stock}**. Closing in 5 seconds...`, components: [] });
+
+      await interaction.update({
+        content: `✅ **Trade confirmed by ${interaction.user}!**\nStock updated: **${item.stock}**\n\nClosing in 5 seconds...`,
+        components: []
+      });
+
       setTimeout(async () => {
         await interaction.channel.delete().catch(console.error);
       }, 5000);
+    }
+
+    // ========== SHOP ADMIN DENY ==========
+
+    if (interaction.customId === 'shop_admin_deny') {
+      const isOwner = interaction.user.id === OWNER_ID;
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      const isAdmin = admins.includes(interaction.user.id);
+      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+
+      await interaction.update({
+        content: `❌ **Transaction denied by ${interaction.user}.**\n\nPlease resolve any issues.`,
+        components: []
+      });
     }
   }
 
@@ -1366,7 +1575,7 @@ client.on('interactionCreate', async (interaction) => {
       const priceInput = new TextInputBuilder()
         .setCustomId('item_price')
         .setLabel('Price')
-        .setPlaceholder('e.g., 100')
+        .setPlaceholder('e.g., 100 PHP')
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
 
@@ -1445,14 +1654,37 @@ client.on('interactionCreate', async (interaction) => {
         for (const adminId of admins) {
           await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         }
-        const doneButton = new ButtonBuilder().setCustomId(`shop_trade_done_${sellerId}_${itemId}`).setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
+
+        const doneButton = new ButtonBuilder()
+          .setCustomId(`shop_buyer_mark_done_${sellerId}_${buyer.id}_${itemId}`)
+          .setLabel('Mark as Done')
+          .setEmoji('✅')
+          .setStyle(ButtonStyle.Success);
+
+        const closeButton = new ButtonBuilder()
+          .setCustomId('close_ticket')
+          .setLabel('Close')
+          .setEmoji('🔒')
+          .setStyle(ButtonStyle.Danger);
+
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
+
         const itemEmbed = new EmbedBuilder()
           .setColor('#FFD700')
           .setTitle('🛍️ Shop Transaction')
-          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n🎮 **Game:** ${item.gameCategory || 'N/A'}\n**Item:** ${item.name}\n**Price:** ${item.price}\n**Stock:** ${item.stock}`)
+          .setDescription(`**Instructions:**\n1️⃣ Buyer clicks "Mark as Done" after receiving item\n2️⃣ Buyer confirms they received it\n3️⃣ Admin verifies and confirms the transaction\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━`)
+          .addFields(
+            { name: '👤 Buyer', value: `${buyer}`, inline: true },
+            { name: '💼 Seller', value: `<@${sellerId}>`, inline: true },
+            { name: '\u200b', value: '\u200b', inline: true },
+            { name: '🎮 Game', value: `${item.gameCategory || 'N/A'}`, inline: true },
+            { name: '🛍️ Item', value: `${item.name}`, inline: true },
+            { name: '💰 Price', value: `${item.price}`, inline: true },
+            { name: '📦 Stock Available', value: `${item.stock}`, inline: false }
+          )
+          .setFooter({ text: '⚠️ Only the buyer can mark this as done' })
           .setTimestamp();
+
         await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
         interaction.update({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, components: [] });
       } catch (err) {
@@ -1466,3 +1698,15 @@ client.on('interactionCreate', async (interaction) => {
 // ==================== BOT LOGIN ====================
 
 client.login(process.env.TOKEN);
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    orderChannels.set(message.guild.id, channelId);
+    saveData();
+    message.reply(`✅ Orders log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  if (command === 'condone') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channelId = args[0];
+    if (!channelId) return message.reply('Usage: `!condone CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channel = message.guild.channels.cache.get(channelId);
