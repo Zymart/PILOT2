@@ -1464,5 +1464,13 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ==================== BOT LOGIN ====================
+// Load extended features
+require('./features.js')(client, { 
+  adminUsers, 
+  ticketCategories, 
+  ticketChannels, 
+  ticketOwners, 
+  saveData 
+});
 
 client.login(process.env.TOKEN);
