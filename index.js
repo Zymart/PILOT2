@@ -1464,8 +1464,11 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ==================== BOT LOGIN ====================
-// Load extended features
-require('./features.js')(client, { 
+// ... rest of your code ...
+
+// Load extended features - ADD THIS BEFORE client.login()
+const loadFeatures = require('./features.js');
+loadFeatures(client, { 
   adminUsers, 
   ticketCategories, 
   ticketChannels, 
@@ -1473,4 +1476,5 @@ require('./features.js')(client, {
   saveData 
 });
 
+// This should be the last line
 client.login(process.env.TOKEN);
