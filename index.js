@@ -1464,8 +1464,5 @@ client.on('interactionCreate', async (interaction) => {
 });
 
 // ==================== BOT LOGIN ====================
-// Load features
-const loadFeatures = require('./features.js');
-loadFeatures(client);
 
 client.login(process.env.TOKEN);
