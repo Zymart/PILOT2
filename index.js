@@ -1463,6 +1463,547 @@ client.on('interactionCreate', async (interaction) => {
   }
 });
 
-// ==================== BOT LOGIN ====================
+// ==================== EXTENDED FEATURES ====================
+// Add this code at the BOTTOM of your index.js, BEFORE client.login()
 
-client.login(process.env.TOKEN);
+let ratings = new Map();
+let leaderboard = new Map();
+let claimedTickets = new Map();
+let ticketTimers = new Map();
+
+const JSONBIN_BIN_ID_FEATURES = process.env.JSONBIN_BIN_ID_FEATURES || '';
+
+async function loadFeaturesData() {
+  if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID_FEATURES) {
+    console.log('⚠️ Features JSONBin not configured');
+    return;
+  }
+
+  return new Promise((resolve) => {
+    const options = {
+      hostname: 'api.jsonbin.io',
+      path: `/v3/b/${JSONBIN_BIN_ID_FEATURES}/latest`,
+      method: 'GET',
+      headers: { 'X-Master-Key': JSONBIN_API_KEY }
+    };
+
+    const req = https.request(options, (res) => {
+      let data = '';
+      res.on('data', (chunk) => data += chunk);
+      res.on('end', () => {
+        try {
+          const json = JSON.parse(data);
+          const record = json.record || {};
+
+          ratings = new Map(Object.entries(record.ratings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))]));
+          leaderboard = new Map(Object.entries(record.leaderboard || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))]));
+          claimedTickets = new Map(Object.entries(record.claimedTickets || {}));
+          ticketTimers = new Map(Object.entries(record.ticketTimers || {}));
+
+          console.log('✅ Features data loaded');
+          resolve();
+        } catch (err) {
+          console.error('Error parsing features data:', err.message);
+          resolve();
+        }
+      });
+    });
+
+    req.on('error', (err) => {
+      console.error('Error loading features:', err.message);
+      resolve();
+    });
+
+    req.end();
+  });
+}
+
+async function saveFeaturesData() {
+  if (!JSONBIN_API_KEY || !JSONBIN_BIN_ID_FEATURES) return;
+
+  const data = {
+    ratings: Object.fromEntries(
+      Array.from(ratings.entries()).map(([guildId, userMap]) => [
+        guildId,
+        Object.fromEntries(userMap)
+      ])
+    ),
+    leaderboard: Object.fromEntries(
+      Array.from(leaderboard.entries()).map(([guildId, userMap]) => [
+        guildId,
+        Object.fromEntries(userMap)
+      ])
+    ),
+    claimedTickets: Object.fromEntries(claimedTickets),
+    ticketTimers: Object.fromEntries(ticketTimers)
+  };
+
+  return new Promise((resolve) => {
+    const jsonData = JSON.stringify(data);
+    const options = {
+      hostname: 'api.jsonbin.io',
+      path: `/v3/b/${JSONBIN_BIN_ID_FEATURES}`,
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Master-Key': JSONBIN_API_KEY,
+        'Content-Length': Buffer.byteLength(jsonData)
+      }
+    };
+
+    const req = https.request(options, (res) => {
+      if (res.statusCode === 200) {
+        console.log('💾 Features saved');
+      }
+      resolve();
+    });
+
+    req.on('error', () => resolve());
+    req.write(jsonData);
+    req.end();
+  });
+}
+
+function formatTime(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = seconds % 60;
+
+  if (hours > 0) return `${hours}h ${minutes}m ${secs}s`;
+  if (minutes > 0) return `${minutes}m ${secs}s`;
+  return `${secs}s`;
+}
+
+function getTimerDuration(ticketId) {
+  const timer = ticketTimers.get(ticketId);
+  if (!timer) return 0;
+  if (timer.isPaused) return timer.pausedTime;
+
+  const currentTime = Math.floor(Date.now() / 1000);
+  return currentTime - timer.startTime - timer.totalPaused;
+}
+
+// Load features data on ready
+client.once('ready', async () => {
+  await loadFeaturesData();
+});
+
+// Add to existing messageCreate handler or create new one
+client.on('messageCreate', async (message) => {
+  if (message.author.bot || !message.content.startsWith(PREFIX)) return;
+
+  const args = message.content.slice(PREFIX.length).trim().split(/ +/);
+  const command = args.shift().toLowerCase();
+
+  // ========== LEADERBOARD ==========
+  if (command === 'leaderboard' || command === 'lb') {
+    const guildLeaderboard = leaderboard.get(message.guild.id) || new Map();
+
+    if (guildLeaderboard.size === 0) {
+      return message.reply('📊 No leaderboard data yet!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    }
+
+    const sortedUsers = Array.from(guildLeaderboard.entries())
+      .sort((a, b) => b[1].completedOrders - a[1].completedOrders)
+      .slice(0, 10);
+
+    const embed = new EmbedBuilder()
+      .setColor('#FFD700')
+      .setTitle('🏆 Service Provider Leaderboard')
+      .setThumbnail(message.guild.iconURL())
+      .setTimestamp();
+
+    let leaderboardText = '';
+    for (let i = 0; i < sortedUsers.length; i++) {
+      const [userId, data] = sortedUsers[i];
+      const user = await client.users.fetch(userId).catch(() => null);
+      const avgRating = data.totalRating > 0 ? data.totalRating.toFixed(1) : 'N/A';
+      const medal = i === 0 ? '🥇' : i === 1 ? '🥈' : i === 2 ? '🥉' : `${i + 1}.`;
+      const stars = avgRating !== 'N/A' ? '⭐'.repeat(Math.round(parseFloat(avgRating))) : '';
+
+      leaderboardText += `${medal} **${user ? user.username : 'Unknown'}**\n`;
+      leaderboardText += `   📦 Orders: **${data.completedOrders}** | ⭐ **${avgRating}** ${stars}\n\n`;
+    }
+
+    embed.addFields({ name: '📊 Rankings', value: leaderboardText });
+    message.reply({ embeds: [embed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 60000));
+    message.delete().catch(() => {});
+  }
+
+  // ========== RATE ==========
+  if (command === 'rate') {
+    if (!message.channel.name.startsWith('ticket-') && !message.channel.name.startsWith('shop-')) {
+      return message.reply('❌ Only in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    const rating = parseInt(args[0]);
+    const review = args.slice(1).join(' ');
+
+    if (!rating || rating < 1 || rating > 5) {
+      return message.reply('Usage: `!rate 1-5 [review]`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    }
+
+    const ticketId = message.channel.id;
+    const providerId = claimedTickets.get(ticketId);
+
+    if (!providerId) {
+      return message.reply('❌ No one claimed this ticket!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    if (providerId === message.author.id) {
+      return message.reply('❌ Cannot rate yourself!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    const guildRatings = ratings.get(message.guild.id) || new Map();
+    const providerRatings = guildRatings.get(providerId) || { totalRating: 0, count: 0, reviews: [] };
+
+    providerRatings.totalRating += rating;
+    providerRatings.count += 1;
+    providerRatings.reviews.push({
+      rating: rating,
+      review: review || 'No review',
+      reviewer: message.author.tag,
+      date: new Date().toISOString()
+    });
+
+    guildRatings.set(providerId, providerRatings);
+    ratings.set(message.guild.id, guildRatings);
+
+    const guildLeaderboard = leaderboard.get(message.guild.id) || new Map();
+    const providerData = guildLeaderboard.get(providerId) || { completedOrders: 0, totalRating: 0, lastUpdated: Date.now() };
+    providerData.totalRating = providerRatings.totalRating / providerRatings.count;
+    guildLeaderboard.set(providerId, providerData);
+    leaderboard.set(message.guild.id, guildLeaderboard);
+
+    await saveFeaturesData();
+
+    const avgRating = (providerRatings.totalRating / providerRatings.count).toFixed(1);
+    const stars = '⭐'.repeat(rating);
+
+    const ratingEmbed = new EmbedBuilder()
+      .setColor('#FFD700')
+      .setTitle('⭐ Rating Submitted!')
+      .setDescription(`${stars} **${rating}/5**${review ? `\n\n💬 *"${review}"*` : ''}`)
+      .addFields(
+        { name: '👤 Provider', value: `<@${providerId}>`, inline: true },
+        { name: '📊 Average', value: `**${avgRating}**/5`, inline: true }
+      )
+      .setTimestamp();
+
+    message.reply({ embeds: [ratingEmbed] });
+    message.delete().catch(() => {});
+  }
+
+  // ========== TIMER ==========
+  if (command === 'timer') {
+    if (!message.channel.name.startsWith('ticket-') && !message.channel.name.startsWith('shop-')) {
+      return message.reply('❌ Timer only in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    const ticketId = message.channel.id;
+    const action = args[0]?.toLowerCase();
+
+    if (action === 'start' || !action) {
+      if (ticketTimers.has(ticketId)) {
+        const duration = getTimerDuration(ticketId);
+        const timer = ticketTimers.get(ticketId);
+        const embed = new EmbedBuilder()
+          .setColor(timer.isPaused ? '#FFA500' : '#00BFFF')
+          .setTitle(`⏱️ Timer ${timer.isPaused ? '(Paused)' : 'Running'}`)
+          .setDescription(`**Elapsed:** ${formatTime(duration)}`)
+          .setTimestamp();
+        return message.reply({ embeds: [embed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 15000));
+      }
+
+      ticketTimers.set(ticketId, {
+        startTime: Math.floor(Date.now() / 1000),
+        pausedTime: 0,
+        totalPaused: 0,
+        isPaused: false
+      });
+      await saveFeaturesData();
+
+      const embed = new EmbedBuilder().setColor('#00FF00').setTitle('⏱️ Timer Started!').setTimestamp();
+      await message.channel.send({ embeds: [embed] });
+      message.delete().catch(() => {});
+    }
+    else if (action === 'stop') {
+      if (!ticketTimers.has(ticketId)) {
+        return message.reply('❌ No timer running!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+      }
+
+      const duration = getTimerDuration(ticketId);
+      ticketTimers.delete(ticketId);
+      await saveFeaturesData();
+
+      const embed = new EmbedBuilder().setColor('#FF0000').setTitle('⏹️ Timer Stopped!').setDescription(`**Total Time:** ${formatTime(duration)}`).setTimestamp();
+      await message.channel.send({ embeds: [embed] });
+      message.delete().catch(() => {});
+    }
+    else if (action === 'pause') {
+      const timer = ticketTimers.get(ticketId);
+      if (!timer) return message.reply('❌ No timer!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+      if (timer.isPaused) return message.reply('❌ Already paused!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+      const currentTime = Math.floor(Date.now() / 1000);
+      timer.pausedTime = currentTime - timer.startTime - timer.totalPaused;
+      timer.isPaused = true;
+      ticketTimers.set(ticketId, timer);
+      await saveFeaturesData();
+
+      const embed = new EmbedBuilder().setColor('#FFA500').setTitle('⏸️ Paused').setDescription(`**Elapsed:** ${formatTime(timer.pausedTime)}`).setTimestamp();
+      await message.channel.send({ embeds: [embed] });
+      message.delete().catch(() => {});
+    }
+    else if (action === 'resume') {
+      const timer = ticketTimers.get(ticketId);
+      if (!timer) return message.reply('❌ No timer!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+      if (!timer.isPaused) return message.reply('❌ Not paused!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+      const currentTime = Math.floor(Date.now() / 1000);
+      timer.totalPaused += currentTime - (timer.startTime + timer.pausedTime);
+      timer.startTime = currentTime - timer.pausedTime;
+      timer.isPaused = false;
+      ticketTimers.set(ticketId, timer);
+      await saveFeaturesData();
+
+      const embed = new EmbedBuilder().setColor('#00FF00').setTitle('▶️ Resumed').setTimestamp();
+      await message.channel.send({ embeds: [embed] });
+      message.delete().catch(() => {});
+    }
+    else if (action === '+') {
+      const seconds = parseInt(args[1]);
+      if (!seconds || seconds <= 0) return message.reply('Usage: `!timer + SECONDS`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+      const timer = ticketTimers.get(ticketId);
+      if (!timer) return message.reply('❌ No timer!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+      timer.startTime -= seconds;
+      ticketTimers.set(ticketId, timer);
+      await saveFeaturesData();
+
+      message.reply(`✅ Added ${formatTime(seconds)}`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+      message.delete().catch(() => {});
+    }
+    else if (action === '-') {
+      const seconds = parseInt(args[1]);
+      if (!seconds || seconds <= 0) return message.reply('Usage: `!timer - SECONDS`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+      const timer = ticketTimers.get(ticketId);
+      if (!timer) return message.reply('❌ No timer!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+      timer.startTime += seconds;
+      ticketTimers.set(ticketId, timer);
+      await saveFeaturesData();
+
+      message.reply(`✅ Removed ${formatTime(seconds)}`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+      message.delete().catch(() => {});
+    }
+  }
+
+  // ========== TRANSCRIPT ==========
+  if (command === 'transcript') {
+    if (!message.channel.name.startsWith('ticket-') && !message.channel.name.startsWith('shop-')) {
+      return message.reply('❌ Only in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    try {
+      await message.reply('📝 Generating transcript...');
+
+      const messages = await message.channel.messages.fetch({ limit: 100 });
+      const messagesArray = Array.from(messages.values()).reverse();
+
+      let transcript = `╔═══════════════════════════════════════╗\n`;
+      transcript += `║        TICKET TRANSCRIPT              ║\n`;
+      transcript += `╚═══════════════════════════════════════╝\n\n`;
+      transcript += `Channel: ${message.channel.name}\n`;
+      transcript += `Guild: ${message.guild.name}\n`;
+      transcript += `Generated: ${new Date().toLocaleString()}\n\n`;
+
+      for (const msg of messagesArray) {
+        transcript += `[${msg.createdAt.toLocaleString()}] ${msg.author.tag}:\n${msg.content || '[Embed/Attachment]'}\n\n`;
+      }
+
+      const buffer = Buffer.from(transcript, 'utf-8');
+      const attachment = new AttachmentBuilder(buffer, { name: `transcript-${Date.now()}.txt` });
+
+      await message.channel.send({ content: '✅ Transcript generated:', files: [attachment] });
+      message.delete().catch(() => {});
+    } catch (err) {
+      console.error('Transcript error:', err);
+      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+  }
+
+  // ========== RATINGS VIEW ==========
+  if (command === 'ratings' || command === 'reviews') {
+    const userId = args[0] ? args[0].replace(/[<@!>]/g, '') : message.author.id;
+    const guildRatings = ratings.get(message.guild.id) || new Map();
+    const userRatings = guildRatings.get(userId);
+
+    if (!userRatings || userRatings.count === 0) {
+      return message.reply('❌ No ratings found!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    const user = await client.users.fetch(userId).catch(() => null);
+    const avgRating = (userRatings.totalRating / userRatings.count).toFixed(1);
+    const stars = '⭐'.repeat(Math.round(parseFloat(avgRating)));
+
+    const embed = new EmbedBuilder()
+      .setColor('#FFD700')
+      .setTitle(`⭐ Ratings for ${user ? user.username : 'Unknown'}`)
+      .setDescription(`**Average:** ${avgRating}/5 ${stars}\n**Total Reviews:** ${userRatings.count}`)
+      .setThumbnail(user ? user.displayAvatarURL() : null)
+      .setTimestamp();
+
+    const recent = userRatings.reviews.slice(-5).reverse();
+    let reviewText = '';
+    for (const rev of recent) {
+      reviewText += `${'⭐'.repeat(rev.rating)} **${rev.rating}/5** - *${rev.review}*\n   ${rev.reviewer}\n\n`;
+    }
+
+    if (reviewText) embed.addFields({ name: '💬 Recent Reviews', value: reviewText });
+
+    message.reply({ embeds: [embed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 60000));
+    message.delete().catch(() => {});
+  }
+});
+
+// Handle button interactions for claim/unclaim
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isButton()) return;
+
+  if (interaction.customId === 'claim_ticket') {
+    const ticketId = interaction.channel.id;
+
+    if (claimedTickets.has(ticketId)) {
+      const claimerId = claimedTickets.get(ticketId);
+      return interaction.reply({ content: `❌ Already claimed by <@${claimerId}>!`, ephemeral: true });
+    }
+
+    claimedTickets.set(ticketId, interaction.user.id);
+    await saveFeaturesData();
+
+    const embed = new EmbedBuilder()
+      .setColor('#00FF00')
+      .setTitle('✅ Ticket Claimed')
+      .setDescription(`${interaction.user} has claimed this ticket!`)
+      .setTimestamp();
+
+    const unclaimBtn = new ButtonBuilder()
+      .setCustomId('unclaim_ticket')
+      .setLabel('Unclaim')
+      .setEmoji('🔓')
+      .setStyle(ButtonStyle.Danger);
+
+    const row = new ActionRowBuilder().addComponents(unclaimBtn);
+
+    await interaction.update({ components: [] });
+    await interaction.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  if (interaction.customId === 'unclaim_ticket') {
+    const ticketId = interaction.channel.id;
+    const claimerId = claimedTickets.get(ticketId);
+
+    if (interaction.user.id !== claimerId && interaction.user.id !== OWNER_ID) {
+      return interaction.reply({ content: '❌ Only claimer or owner can unclaim!', ephemeral: true });
+    }
+
+    claimedTickets.delete(ticketId);
+    await saveFeaturesData();
+
+    const embed = new EmbedBuilder()
+      .setColor('#FFA500')
+      .setTitle('🔓 Ticket Unclaimed')
+      .setDescription('This ticket is now available to claim.')
+      .setTimestamp();
+
+    const claimBtn = new ButtonBuilder()
+      .setCustomId('claim_ticket')
+      .setLabel('Claim Ticket')
+      .setEmoji('✋')
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(claimBtn);
+
+    await interaction.update({ components: [] });
+    await interaction.channel.send({ embeds: [embed], components: [row] });
+  }
+
+  // Enhanced confirm_done to update leaderboard
+  if (interaction.customId === 'confirm_done') {
+    const ticketId = interaction.channel.id;
+
+    if (claimedTickets.has(ticketId)) {
+      const claimerId = claimedTickets.get(ticketId);
+      const guildLeaderboard = leaderboard.get(interaction.guild.id) || new Map();
+      const providerData = guildLeaderboard.get(claimerId) || { completedOrders: 0, totalRating: 0, lastUpdated: Date.now() };
+
+      providerData.completedOrders += 1;
+      providerData.lastUpdated = Date.now();
+
+      guildLeaderboard.set(claimerId, providerData);
+      leaderboard.set(interaction.guild.id, guildLeaderboard);
+      await saveFeaturesData();
+
+      const claimer = await client.users.fetch(claimerId).catch(() => null);
+      if (claimer) {
+        await interaction.channel.send(`🏆 **${claimer.username}** completed order #**${providerData.completedOrders}**!`);
+      }
+    }
+
+    if (ticketTimers.has(ticketId)) {
+      const duration = getTimerDuration(ticketId);
+      ticketTimers.delete(ticketId);
+      await saveFeaturesData();
+      await interaction.channel.send(`⏱️ **Service Time:** ${formatTime(duration)}`);
+    }
+
+    claimedTickets.delete(ticketId);
+    await saveFeaturesData();
+  }
+});
+
+// Enhance ticket creation with claim button
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isModalSubmit() || interaction.customId !== 'ticket_modal') return;
+
+  setTimeout(async () => {
+    try {
+      const ticketChannel = interaction.guild.channels.cache.find(
+        ch => ch.name === `ticket-${interaction.user.username.toLowerCase()}` && ch.createdTimestamp > Date.now() - 10000
+      );
+
+      if (!ticketChannel) return;
+
+      const embed = new EmbedBuilder()
+        .setColor('#00FFFF')
+        .setAuthor({ name: '🎫 Support Ticket', iconURL: interaction.guild.iconURL() })
+        .setTitle(`✨ Welcome, ${interaction.user.username}!`)
+        .setDescription('Our team will assist you shortly!')
+        .addFields(
+          { name: '📋 What to expect', value: '• Staff will claim your ticket\n• Please be patient', inline: false },
+          { name: '🎯 Status', value: '🟡 **Waiting for Staff**', inline: true }
+        )
+        .setThumbnail(interaction.user.displayAvatarURL())
+        .setTimestamp();
+
+      const claimBtn = new ButtonBuilder()
+        .setCustomId('claim_ticket')
+        .setLabel('Claim Ticket')
+        .setEmoji('✋')
+        .setStyle(ButtonStyle.Primary);
+
+      const row = new ActionRowBuilder().addComponents(claimBtn);
+
+      await ticketChannel.send({ embeds: [embed], components: [row] });
+    } catch (err) {
+      console.error('Enhance ticket error:', err);
+    }
+  }, 3000);
+});
+
+console.log('✅ Extended features loaded');
+
+// ==================== END OF EXTENDED FEATURES ====================
