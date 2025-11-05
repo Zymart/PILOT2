@@ -729,126 +729,39 @@ client.on('messageCreate', async (message) => {
 
   // ========== WEBHOOK CHANNEL CREATION ==========
 
-  // Replace your createweb command with this fixed version
-  // Find this section in your code and replace it
-
   if (command === 'createweb') {
     const channelName = args.join('-').toLowerCase();
     if (!channelName) return message.reply('Usage: `!createweb name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
     const botMember = message.guild.members.cache.get(client.user.id);
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) 
-      return message.reply('❌ Need Manage Channels!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) 
-      return message.reply('❌ Need Manage Webhooks!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return message.reply('❌ Need Manage Channels!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return message.reply('❌ Need Manage Webhooks!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     try {
       let permissionOverwrites = [];
       let ticketOwner = null;
-
-      // Find ticket owner if in ticket channel
       if (message.channel.name.startsWith('ticket-')) {
         const ticketOwnerName = message.channel.name.replace('ticket-', '');
         ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
       }
-
-      // Base permissions - everyone denied
-      permissionOverwrites.push({ 
-        id: message.guild.id, 
-        deny: [PermissionFlagsBits.ViewChannel] 
-      });
-
-      // Bot permissions
-      permissionOverwrites.push({ 
-        id: client.user.id, 
-        allow: [
-          PermissionFlagsBits.ViewChannel, 
-          PermissionFlagsBits.SendMessages, 
-          PermissionFlagsBits.ReadMessageHistory, 
-          PermissionFlagsBits.ManageWebhooks
-        ] 
-      });
-
-      // Ticket owner permissions
-      if (ticketOwner) {
-        permissionOverwrites.push({ 
-          id: ticketOwner.id, 
-          allow: [
-            PermissionFlagsBits.ViewChannel, 
-            PermissionFlagsBits.SendMessages, 
-            PermissionFlagsBits.ReadMessageHistory
-          ] 
-        });
-      }
-
-      // Owner permissions - only if owner is in the server
-      const ownerMember = await message.guild.members.fetch(OWNER_ID).catch(() => null);
-      if (ownerMember) {
-        permissionOverwrites.push({ 
-          id: OWNER_ID, 
-          allow: [
-            PermissionFlagsBits.ViewChannel, 
-            PermissionFlagsBits.SendMessages, 
-            PermissionFlagsBits.ReadMessageHistory
-          ] 
-        });
-      }
-
-      // Admin permissions - only for members in the server
+      permissionOverwrites.push({ id: message.guild.id, deny: [PermissionFlagsBits.ViewChannel] });
+      permissionOverwrites.push({ id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks] });
+      if (ticketOwner) permissionOverwrites.push({ id: ticketOwner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+      permissionOverwrites.push({ id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       const admins = adminUsers.get(message.guild.id) || [];
       for (const adminId of admins) {
-        const adminMember = await message.guild.members.fetch(adminId).catch(() => null);
-        if (adminMember) {
-          permissionOverwrites.push({ 
-            id: adminId, 
-            allow: [
-              PermissionFlagsBits.ViewChannel, 
-              PermissionFlagsBits.SendMessages, 
-              PermissionFlagsBits.ReadMessageHistory
-            ] 
-          });
-        }
+        permissionOverwrites.push({ id: adminId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       }
-
-      // Staff role permissions
-      const staffRole = message.guild.roles.cache.find(r => 
-        r.name.toLowerCase().includes('staff') || 
-        r.name.toLowerCase().includes('admin') || 
-        r.name.toLowerCase().includes('mod')
-      );
-      if (staffRole) {
-        permissionOverwrites.push({ 
-          id: staffRole.id, 
-          allow: [
-            PermissionFlagsBits.ViewChannel, 
-            PermissionFlagsBits.SendMessages, 
-            PermissionFlagsBits.ReadMessageHistory
-          ] 
-        });
-      }
-
+      const staffRole = message.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
+      if (staffRole) permissionOverwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
       const webCategoryId = webCategories.get(message.guild.id);
-      const newChannel = await message.guild.channels.create({ 
-        name: channelName, 
-        type: ChannelType.GuildText, 
-        parent: webCategoryId || null, 
-        permissionOverwrites: permissionOverwrites 
-      });
-
-      // Track channel in ticket system
+      const newChannel = await message.guild.channels.create({ name: channelName, type: ChannelType.GuildText, parent: webCategoryId || null, permissionOverwrites: permissionOverwrites });
       if (message.channel.name.startsWith('ticket-')) {
         const ticketId = message.channel.id;
         if (!ticketChannels.has(ticketId)) ticketChannels.set(ticketId, []);
         ticketChannels.get(ticketId).push(newChannel.id);
         saveData();
       }
-
-      // Create webhook
       try {
-        const webhook = await newChannel.createWebhook({ 
-          name: `${channelName}-webhook`, 
-          reason: `Created by ${message.author.tag}` 
-        });
+        const webhook = await newChannel.createWebhook({ name: `${channelName}-webhook`, reason: `Created by ${message.author.tag}` });
         await message.channel.send(`✅ Channel: <#${newChannel.id}>`);
         await message.channel.send(webhook.url);
       } catch (webhookError) {
@@ -860,7 +773,7 @@ client.on('messageCreate', async (message) => {
       message.reply(`❌ Failed! ${err.message}`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
   }
-  
+
   // ========== DONE COMMAND ==========
 
   if (command === 'done') {
@@ -951,107 +864,39 @@ client.on('messageCreate', async (message) => {
 });
 
 // ==================== BUTTON INTERACTIONS ====================
-    // Add this at the START of your interaction handler
-    // Replace: client.on('interactionCreate', async (interaction) => {
-    // With this:
 
-    client.on('interactionCreate', async (interaction) => {
-      // Prevent interaction timeout errors
-      try {
-        // For buttons - defer if it's a complex operation
-        if (interaction.isButton()) {
-          // Defer immediately for operations that take time
-          const deferButtons = [
-            'shop_browse',
-            'shop_manage', 
-            'shop_add',
-            'shop_remove',
-            'shop_change',
-            'create_ticket',
-            'confirm_done',
-            'shop_trade_done_'
-          ];
+client.on('interactionCreate', async (interaction) => {
+  if (interaction.isButton()) {
 
-          const shouldDefer = deferButtons.some(btn => interaction.customId.startsWith(btn));
+    // ========== SHOP BROWSE ==========
 
-          if (shouldDefer && !interaction.deferred && !interaction.replied) {
-            await interaction.deferReply({ ephemeral: true }).catch(() => {});
-          }
-        }
-
-        // For select menus
-        if (interaction.isStringSelectMenu()) {
-          if (!interaction.deferred && !interaction.replied) {
-            await interaction.deferUpdate().catch(() => {});
-          }
-        }
-
-        // For modals - no defer needed, they handle it differently
-
-      } catch (err) {
-        console.error('Interaction defer error:', err);
-      }
-
-      // Now continue with your existing interaction handling...
-      if (interaction.isButton()) {
-        // ... your existing button code ...
-      }
-
-      // ... rest of your interaction code ...
-    });
-
-
-    // ALTERNATIVE: Add error handling wrapper
-    // Wrap complex button operations like this:
-
-    // Example for shop_browse:
     if (interaction.customId === 'shop_browse') {
-      try {
-        const guildGames = gameCategories.get(interaction.guild.id) || [];
+      const guildGames = gameCategories.get(interaction.guild.id) || [];
 
-        if (guildGames.length === 0) {
-          const content = '❌ No game categories! Ask admin to use `!addgame Game Name`';
-          if (interaction.deferred) {
-            return interaction.editReply({ content, ephemeral: true });
-          } else {
-            return interaction.reply({ content, ephemeral: true });
-          }
-        }
-
-        const selectOptions = guildGames.slice(0, 25).map(game => ({
-          label: game,
-          description: `Browse ${game} items`,
-          value: game
-        }));
-
-        const selectMenu = new StringSelectMenuBuilder()
-          .setCustomId('shop_select_game')
-          .setPlaceholder('🎮 Select a game category')
-          .addOptions(selectOptions);
-
-        const row = new ActionRowBuilder().addComponents(selectMenu);
-
-        const payload = { 
-          content: '🎮 **What game are you looking for?**\nSelect a category below:', 
-          components: [row], 
-          ephemeral: true 
-        };
-
-        if (interaction.deferred) {
-          await interaction.editReply(payload);
-        } else {
-          await interaction.reply(payload);
-        }
-      } catch (err) {
-        console.error('shop_browse error:', err);
-        const errorMsg = { content: '❌ Something went wrong!', ephemeral: true };
-        if (interaction.deferred) {
-          await interaction.editReply(errorMsg).catch(() => {});
-        } else {
-          await interaction.reply(errorMsg).catch(() => {});
-        }
+      if (guildGames.length === 0) {
+        return interaction.reply({ content: '❌ No game categories! Ask admin to use `!addgame Game Name`', ephemeral: true });
       }
+
+      const selectOptions = guildGames.slice(0, 25).map(game => ({
+        label: game,
+        description: `Browse ${game} items`,
+        value: game
+      }));
+
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId('shop_select_game')
+        .setPlaceholder('🎮 Select a game category')
+        .addOptions(selectOptions);
+
+      const row = new ActionRowBuilder().addComponents(selectMenu);
+
+      await interaction.reply({ 
+        content: '🎮 **What game are you looking for?**\nSelect a category below:', 
+        components: [row], 
+        ephemeral: true 
+      });
     }
+
     // ========== SHOP MANAGE ==========
 
     if (interaction.customId === 'shop_manage') {
