@@ -11,6 +11,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
+    GatewayIntentBits.GuildMembers, // ADDED: Required for fetching members
   ],
 });
 
@@ -172,7 +173,7 @@ let shopCategories = new Map();
 let transcriptChannels = new Map();
 let tradeChannels = new Map();
 let shopNews = new Map();
-let gameCategories = new Map(); // NEW: Store game categories per guild
+let gameCategories = new Map();
 
 // ==================== BOT READY ====================
 
@@ -735,33 +736,98 @@ client.on('messageCreate', async (message) => {
     const botMember = message.guild.members.cache.get(client.user.id);
     if (!botMember.permissions.has(PermissionFlagsBits.ManageChannels)) return message.reply('❌ Need Manage Channels!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     if (!botMember.permissions.has(PermissionFlagsBits.ManageWebhooks)) return message.reply('❌ Need Manage Webhooks!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
     try {
       let permissionOverwrites = [];
       let ticketOwner = null;
+
+      // Check if this is being called from a ticket channel
       if (message.channel.name.startsWith('ticket-')) {
         const ticketOwnerName = message.channel.name.replace('ticket-', '');
         ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
       }
-      permissionOverwrites.push({ id: message.guild.id, deny: [PermissionFlagsBits.ViewChannel] });
-      permissionOverwrites.push({ id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks] });
-      if (ticketOwner) permissionOverwrites.push({ id: ticketOwner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-      permissionOverwrites.push({ id: OWNER_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+
+      // Base permissions
+      permissionOverwrites.push({ 
+        id: message.guild.id, 
+        deny: [PermissionFlagsBits.ViewChannel] 
+      });
+
+      permissionOverwrites.push({ 
+        id: client.user.id, 
+        allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks] 
+      });
+
+      // Add ticket owner permissions if exists
+      if (ticketOwner) {
+        permissionOverwrites.push({ 
+          id: ticketOwner.id, 
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] 
+        });
+      }
+
+      // Add owner permissions - FETCH THE USER FIRST
+      try {
+        await message.guild.members.fetch(OWNER_ID);
+        permissionOverwrites.push({ 
+          id: OWNER_ID, 
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] 
+        });
+      } catch (err) {
+        console.log('⚠️ Owner not in guild, skipping owner permissions');
+      }
+
+      // Add admin permissions - FETCH EACH ADMIN FIRST
       const admins = adminUsers.get(message.guild.id) || [];
       for (const adminId of admins) {
-        permissionOverwrites.push({ id: adminId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+        try {
+          await message.guild.members.fetch(adminId);
+          permissionOverwrites.push({ 
+            id: adminId, 
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] 
+          });
+        } catch (err) {
+          console.log(`⚠️ Admin ${adminId} not in guild, skipping`);
+        }
       }
-      const staffRole = message.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
-      if (staffRole) permissionOverwrites.push({ id: staffRole.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
+
+      // Add staff role permissions if exists
+      const staffRole = message.guild.roles.cache.find(r => 
+        r.name.toLowerCase().includes('staff') || 
+        r.name.toLowerCase().includes('admin') || 
+        r.name.toLowerCase().includes('mod')
+      );
+
+      if (staffRole) {
+        permissionOverwrites.push({ 
+          id: staffRole.id, 
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] 
+        });
+      }
+
       const webCategoryId = webCategories.get(message.guild.id);
-      const newChannel = await message.guild.channels.create({ name: channelName, type: ChannelType.GuildText, parent: webCategoryId || null, permissionOverwrites: permissionOverwrites });
+
+      const newChannel = await message.guild.channels.create({ 
+        name: channelName, 
+        type: ChannelType.GuildText, 
+        parent: webCategoryId || null, 
+        permissionOverwrites: permissionOverwrites 
+      });
+
+      // Track the channel if created from a ticket
       if (message.channel.name.startsWith('ticket-')) {
         const ticketId = message.channel.id;
         if (!ticketChannels.has(ticketId)) ticketChannels.set(ticketId, []);
         ticketChannels.get(ticketId).push(newChannel.id);
         saveData();
       }
+
+      // Create webhook
       try {
-        const webhook = await newChannel.createWebhook({ name: `${channelName}-webhook`, reason: `Created by ${message.author.tag}` });
+        const webhook = await newChannel.createWebhook({ 
+          name: `${channelName}-webhook`, 
+          reason: `Created by ${message.author.tag}` 
+        });
         await message.channel.send(`✅ Channel: <#${newChannel.id}>`);
         await message.channel.send(webhook.url);
       } catch (webhookError) {
@@ -1440,11 +1506,26 @@ client.on('interactionCreate', async (interaction) => {
         if (staffRole) {
           await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         }
-        await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+
+        // Add owner permissions
+        try {
+          await interaction.guild.members.fetch(OWNER_ID);
+          await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        } catch (err) {
+          console.log('⚠️ Owner not in guild');
+        }
+
+        // Add admin permissions
         const admins = adminUsers.get(interaction.guild.id) || [];
         for (const adminId of admins) {
-          await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+          try {
+            await interaction.guild.members.fetch(adminId);
+            await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+          } catch (err) {
+            console.log(`⚠️ Admin ${adminId} not in guild`);
+          }
         }
+
         const doneButton = new ButtonBuilder().setCustomId(`shop_trade_done_${sellerId}_${itemId}`).setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
         const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
