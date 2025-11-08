@@ -904,8 +904,16 @@ client.on('interactionCreate', async (interaction) => {
     // ========== TICKET MODAL ==========
 
     if (interaction.customId === 'ticket_modal') {
+      // Defer the reply immediately to avoid timeout
+      await interaction.deferReply({ ephemeral: true });
+
       const serviceDescription = interaction.fields.getTextInputValue('service_type');
       const categoryId = ticketCategories.get(interaction.guild.id);
+
+      if (!categoryId) {
+        return interaction.editReply({ content: '❌ Ticket category not configured!' });
+      }
+
       try {
         const ticketChannel = await interaction.guild.channels.create({
           name: `ticket-${interaction.user.username}`,
@@ -917,6 +925,7 @@ client.on('interactionCreate', async (interaction) => {
             { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
           ],
         });
+
         const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
         if (staffRole) {
           await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
@@ -946,8 +955,10 @@ client.on('interactionCreate', async (interaction) => {
         const row = new ActionRowBuilder().addComponents(claimButton, doneButton, closeButton);
 
         await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
+
         ticketOwners.set(ticketChannel.id, interaction.user.id);
-        saveData();
+        await saveData();
+
         const orderChannelId = orderChannels.get(interaction.guild.id);
         if (orderChannelId) {
           const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
@@ -967,10 +978,11 @@ client.on('interactionCreate', async (interaction) => {
             await orderChannel.send({ embeds: [orderEmbed] });
           }
         }
-        interaction.reply({ content: `✅ Ticket created! <#${ticketChannel.id}>`, ephemeral: true });
+
+        await interaction.editReply({ content: `✅ Ticket created! <#${ticketChannel.id}>` });
       } catch (err) {
-        console.error(err);
-        interaction.reply({ content: '❌ Failed to create ticket!', ephemeral: true });
+        console.error('Ticket Creation Error:', err);
+        await interaction.editReply({ content: '❌ Failed to create ticket!' });
       }
     }
   }
