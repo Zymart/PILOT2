@@ -3,7 +3,7 @@ if (!global.ReadableStream) {
   global.ReadableStream = require('stream/web').ReadableStream;
 }
 
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
 const https = require('https');
 
 const client = new Client({
@@ -11,7 +11,7 @@ const client = new Client({
     GatewayIntentBits.Guilds,
     GatewayIntentBits.GuildMessages,
     GatewayIntentBits.MessageContent,
-    GatewayIntentBits.GuildMembers, // ADDED: Required for fetching members
+    GatewayIntentBits.GuildMembers,
   ],
 });
 
@@ -74,18 +74,9 @@ async function saveData() {
     adminUsers: Object.fromEntries(adminUsers),
     ticketChannels: Object.fromEntries(ticketChannels),
     webCategories: Object.fromEntries(webCategories),
-    shopListings: Object.fromEntries(
-      Array.from(shopListings.entries()).map(([guildId, userMap]) => [
-        guildId,
-        Object.fromEntries(userMap)
-      ])
-    ),
     ticketOwners: Object.fromEntries(ticketOwners),
-    shopCategories: Object.fromEntries(shopCategories),
     transcriptChannels: Object.fromEntries(transcriptChannels),
-    tradeChannels: Object.fromEntries(tradeChannels),
-    shopNews: Object.fromEntries(shopNews),
-    gameCategories: Object.fromEntries(gameCategories)
+    ticketClaims: Object.fromEntries(ticketClaims)
   };
 
   return new Promise((resolve) => {
@@ -132,13 +123,9 @@ function parseData(data) {
     adminUsers: new Map(Object.entries(data.adminUsers || {}).map(([k, v]) => [k, v || []])),
     ticketChannels: new Map(Object.entries(data.ticketChannels || {}).map(([k, v]) => [k, v || []])),
     webCategories: new Map(Object.entries(data.webCategories || {})),
-    shopListings: new Map(Object.entries(data.shopListings || {}).map(([k, v]) => [k, new Map(Object.entries(v || {}))])),
     ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
-    shopCategories: new Map(Object.entries(data.shopCategories || {})),
     transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
-    tradeChannels: new Map(Object.entries(data.tradeChannels || {})),
-    shopNews: new Map(Object.entries(data.shopNews || {})),
-    gameCategories: new Map(Object.entries(data.gameCategories || {}).map(([k, v]) => [k, v || []]))
+    ticketClaims: new Map(Object.entries(data.ticketClaims || {}))
   };
 }
 
@@ -150,13 +137,9 @@ function getEmptyData() {
     adminUsers: new Map(),
     ticketChannels: new Map(),
     webCategories: new Map(),
-    shopListings: new Map(),
     ticketOwners: new Map(),
-    shopCategories: new Map(),
     transcriptChannels: new Map(),
-    tradeChannels: new Map(),
-    shopNews: new Map(),
-    gameCategories: new Map()
+    ticketClaims: new Map()
   };
 }
 
@@ -167,13 +150,9 @@ let doneChannels = new Map();
 let adminUsers = new Map();
 let ticketChannels = new Map();
 let webCategories = new Map();
-let shopListings = new Map();
 let ticketOwners = new Map();
-let shopCategories = new Map();
 let transcriptChannels = new Map();
-let tradeChannels = new Map();
-let shopNews = new Map();
-let gameCategories = new Map();
+let ticketClaims = new Map();
 
 // ==================== BOT READY ====================
 
@@ -186,13 +165,9 @@ client.once('ready', async () => {
   adminUsers = loadedData.adminUsers;
   ticketChannels = loadedData.ticketChannels;
   webCategories = loadedData.webCategories;
-  shopListings = loadedData.shopListings;
   ticketOwners = loadedData.ticketOwners;
-  shopCategories = loadedData.shopCategories;
   transcriptChannels = loadedData.transcriptChannels;
-  tradeChannels = loadedData.tradeChannels;
-  shopNews = loadedData.shopNews || new Map();
-  gameCategories = loadedData.gameCategories || new Map();
+  ticketClaims = loadedData.ticketClaims || new Map();
   console.log('✅ Data loaded from cloud storage');
 
   setInterval(async () => {
@@ -209,27 +184,9 @@ async function cleanupOrphanedData() {
     if (!guild) {
       ticketChannels.delete(ticketId);
       ticketOwners.delete(ticketId);
+      ticketClaims.delete(ticketId);
       cleaned = true;
       console.log(`🗑️ Removed orphaned ticket ${ticketId}`);
-    }
-  }
-
-  for (const [guildId, shops] of shopListings.entries()) {
-    const guild = client.guilds.cache.get(guildId);
-    if (!guild) {
-      shopListings.delete(guildId);
-      cleaned = true;
-      console.log(`🗑️ Removed shop data for deleted guild ${guildId}`);
-      continue;
-    }
-
-    for (const [userId, items] of shops.entries()) {
-      const member = await guild.members.fetch(userId).catch(() => null);
-      if (!member) {
-        shops.delete(userId);
-        cleaned = true;
-        console.log(`🗑️ Removed shop items for user ${userId} who left`);
-      }
     }
   }
 
@@ -307,57 +264,6 @@ client.on('messageCreate', async (message) => {
       r.permissions.has(PermissionFlagsBits.Administrator)
     );
     if (!hasModerator) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-  }
-
-  // ========== GAME CATEGORY MANAGEMENT ==========
-
-  if (command === 'addgame') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const gameName = args.join(' ');
-    if (!gameName) return message.reply('Usage: `!addgame Game Name`\nExample: `!addgame Anime Vanguard`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
-    const guildGames = gameCategories.get(message.guild.id) || [];
-    if (guildGames.includes(gameName)) {
-      return message.reply(`❌ **${gameName}** already exists!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    guildGames.push(gameName);
-    gameCategories.set(message.guild.id, guildGames);
-    await saveData();
-    message.reply(`✅ Added game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'removegame') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const gameName = args.join(' ');
-    if (!gameName) return message.reply('Usage: `!removegame Game Name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
-    const guildGames = gameCategories.get(message.guild.id) || [];
-    const index = guildGames.indexOf(gameName);
-    if (index === -1) {
-      return message.reply(`❌ **${gameName}** not found!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    guildGames.splice(index, 1);
-    gameCategories.set(message.guild.id, guildGames);
-    await saveData();
-    message.reply(`✅ Removed game category: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'listgames') {
-    const guildGames = gameCategories.get(message.guild.id) || [];
-    if (guildGames.length === 0) {
-      return message.reply('📋 No game categories yet! Use `!addgame Game Name` to add one.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    }
-
-    let gameList = '🎮 **Game Categories:**\n\n';
-    guildGames.forEach((game, index) => {
-      gameList += `${index + 1}. ${game}\n`;
-    });
-    message.reply(gameList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
-    message.delete().catch(() => {});
   }
 
   // ========== EMBED COMMANDS ==========
@@ -586,30 +492,6 @@ client.on('messageCreate', async (message) => {
     message.delete().catch(() => {});
   }
 
-  if (command === 'conshop') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const categoryId = args[0];
-    if (!categoryId) return message.reply('Usage: `!conshop CATEGORY_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const category = message.guild.channels.cache.get(categoryId);
-    if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    shopCategories.set(message.guild.id, categoryId);
-    saveData();
-    message.reply(`✅ Shop category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  if (command === 'contrade') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!contrade CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    tradeChannels.set(message.guild.id, channelId);
-    saveData();
-    message.reply(`✅ Trade log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
   if (command === 'contranscript') {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     const channelId = args[0];
@@ -620,112 +502,6 @@ client.on('messageCreate', async (message) => {
     saveData();
     message.reply(`✅ Transcript log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     message.delete().catch(() => {});
-  }
-
-  if (command === 'connews') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!connews CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    shopNews.set(message.guild.id, channelId);
-    saveData();
-    message.reply(`✅ Shop news channel set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    message.delete().catch(() => {});
-  }
-
-  // ========== STOCK MANAGEMENT COMMAND ==========
-
-  if (command === 'stock') {
-    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-
-    const action = args[0];
-    const amount = parseInt(args[1]);
-    const userId = args[2];
-    const itemName = args.slice(3).join(' ');
-
-    if (!action || !amount || !userId || !itemName) {
-      return message.reply('Usage: `!stock +/- AMOUNT USER_ID ITEM_NAME`\nExample: `!stock + 10 123456789 Diamond Sword`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
-    }
-
-    if (action !== '+' && action !== '-') {
-      return message.reply('❌ Action must be `+` or `-`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    if (isNaN(amount) || amount <= 0) {
-      return message.reply('❌ Amount must be a positive number!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    const guildShops = shopListings.get(message.guild.id) || new Map();
-    let userItems = guildShops.get(userId) || [];
-
-    const item = userItems.find(i => i.name.toLowerCase() === itemName.toLowerCase());
-
-    if (!item) {
-      return message.reply(`❌ Item **${itemName}** not found for user <@${userId}>!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-
-    const oldStock = item.stock || 0;
-
-    if (action === '+') {
-      item.stock = oldStock + amount;
-    } else {
-      item.stock = Math.max(0, oldStock - amount);
-    }
-
-    guildShops.set(userId, userItems);
-    shopListings.set(message.guild.id, guildShops);
-    await saveData();
-
-    const user = await client.users.fetch(userId).catch(() => null);
-    const stockEmbed = new EmbedBuilder()
-      .setColor(action === '+' ? '#00FF00' : '#FF6B35')
-      .setAuthor({ 
-        name: action === '+' ? '📈 Stock Increased' : '📉 Stock Decreased', 
-        iconURL: message.guild.iconURL() 
-      })
-      .setTitle(`${item.name}`)
-      .setDescription(`Stock has been ${action === '+' ? '**increased**' : '**decreased**'} successfully!`)
-      .addFields(
-        { name: '🎮 Game', value: `\`\`\`${item.gameCategory || 'N/A'}\`\`\``, inline: true },
-        { name: '👤 Seller', value: `${user ? user : `<@${userId}>`}`, inline: true },
-        { name: '💰 Price', value: `\`\`\`${item.price}\`\`\``, inline: true },
-        { name: '📊 Previous Stock', value: `\`\`\`${oldStock}\`\`\``, inline: true },
-        { name: `${action === '+' ? '➕' : '➖'} Change`, value: `\`\`\`${action}${amount}\`\`\``, inline: true },
-        { name: '📦 New Stock', value: `\`\`\`${item.stock}\`\`\``, inline: true }
-      )
-      .setThumbnail(user ? user.displayAvatarURL({ size: 256 }) : message.guild.iconURL())
-      .setFooter({ text: `Updated by ${message.author.tag}`, iconURL: message.author.displayAvatarURL() })
-      .setTimestamp();
-
-    message.reply({ embeds: [stockEmbed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
-    message.delete().catch(() => {});
-
-    const newsChannelId = shopNews.get(message.guild.id);
-    if (newsChannelId) {
-      const newsChannel = message.guild.channels.cache.get(newsChannelId);
-      if (newsChannel) {
-        const newsEmbed = new EmbedBuilder()
-          .setColor(action === '+' ? '#00FF00' : '#FFA500')
-          .setAuthor({ 
-            name: action === '+' ? '🆕 Fresh Stock Available!' : '⚠️ Stock Update', 
-            iconURL: message.guild.iconURL() 
-          })
-          .setTitle(`${item.name}`)
-          .setDescription(`${action === '+' ? '✨ **New stock just arrived!** Get it while it lasts!' : '📊 **Stock has been adjusted**'}`)
-          .addFields(
-            { name: '🎮 Game', value: `${item.gameCategory || 'N/A'}`, inline: true },
-            { name: '📦 Stock', value: `**${item.stock}** available`, inline: true },
-            { name: '💰 Price', value: `${item.price}`, inline: true },
-            { name: '👤 Seller', value: `<@${userId}>`, inline: false }
-          )
-          .setThumbnail(user ? user.displayAvatarURL({ size: 256 }) : null)
-          .setTimestamp();
-
-        const sentMsg = await newsChannel.send({ embeds: [newsEmbed] });
-        await sentMsg.react(action === '+' ? '🆕' : '📊');
-      }
-    }
   }
 
   // ========== WEBHOOK CHANNEL CREATION ==========
@@ -741,13 +517,11 @@ client.on('messageCreate', async (message) => {
       let permissionOverwrites = [];
       let ticketOwner = null;
 
-      // Check if this is being called from a ticket channel
       if (message.channel.name.startsWith('ticket-')) {
         const ticketOwnerName = message.channel.name.replace('ticket-', '');
         ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
       }
 
-      // Base permissions
       permissionOverwrites.push({ 
         id: message.guild.id, 
         deny: [PermissionFlagsBits.ViewChannel] 
@@ -758,7 +532,6 @@ client.on('messageCreate', async (message) => {
         allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageWebhooks] 
       });
 
-      // Add ticket owner permissions if exists
       if (ticketOwner) {
         permissionOverwrites.push({ 
           id: ticketOwner.id, 
@@ -766,7 +539,6 @@ client.on('messageCreate', async (message) => {
         });
       }
 
-      // Add owner permissions - FETCH THE USER FIRST
       try {
         await message.guild.members.fetch(OWNER_ID);
         permissionOverwrites.push({ 
@@ -777,7 +549,6 @@ client.on('messageCreate', async (message) => {
         console.log('⚠️ Owner not in guild, skipping owner permissions');
       }
 
-      // Add admin permissions - FETCH EACH ADMIN FIRST
       const admins = adminUsers.get(message.guild.id) || [];
       for (const adminId of admins) {
         try {
@@ -791,7 +562,6 @@ client.on('messageCreate', async (message) => {
         }
       }
 
-      // Add staff role permissions if exists
       const staffRole = message.guild.roles.cache.find(r => 
         r.name.toLowerCase().includes('staff') || 
         r.name.toLowerCase().includes('admin') || 
@@ -814,7 +584,6 @@ client.on('messageCreate', async (message) => {
         permissionOverwrites: permissionOverwrites 
       });
 
-      // Track the channel if created from a ticket
       if (message.channel.name.startsWith('ticket-')) {
         const ticketId = message.channel.id;
         if (!ticketChannels.has(ticketId)) ticketChannels.set(ticketId, []);
@@ -822,7 +591,6 @@ client.on('messageCreate', async (message) => {
         saveData();
       }
 
-      // Create webhook
       try {
         const webhook = await newChannel.createWebhook({ 
           name: `${channelName}-webhook`, 
@@ -890,22 +658,6 @@ client.on('messageCreate', async (message) => {
     }
   }
 
-  // ========== SHOP PANEL ==========
-
-  if (command === 'shop') {
-    const embed = new EmbedBuilder().setColor('#FFD700').setTitle('🛒 Shop').setDescription('Welcome to the shop! Click below to browse items or manage your shop.').setTimestamp().setFooter({ text: 'Shop System' });
-    const shopButton = new ButtonBuilder().setCustomId('shop_browse').setLabel('Shop').setEmoji('🛍️').setStyle(ButtonStyle.Primary);
-    const manageButton = new ButtonBuilder().setCustomId('shop_manage').setLabel('Manage Shop').setEmoji('⚙️').setStyle(ButtonStyle.Secondary);
-    const row = new ActionRowBuilder().addComponents(shopButton, manageButton);
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed], components: [row] });
-    } catch (err) {
-      console.error(err);
-      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-  }
-
   // ========== HELP COMMAND ==========
 
   if (command === 'help') {
@@ -916,13 +668,11 @@ client.on('messageCreate', async (message) => {
       .addFields(
         { name: '📝 Embed Commands', value: '`!embed <msg>` - Basic embed\n`!auto <msg>` - Auto-styled embed\n`!fancy <title>\\n<msg>` - Fancy embed\n`!announce <msg>` - Announcement\n`!quote <msg>` - Quote style\n`!colorembed #HEX <msg>` - Custom color\n`!success <msg>` - Success message\n`!error <msg>` - Error message\n`!info <msg>` - Info message', inline: false },
         { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Mark ticket as done\n`!createweb <name>` - Create webhook channel', inline: false },
-        { name: '🛒 Shop System', value: '`!shop` - Create shop panel\n`!stock +/- <amount> <user_id> <item>` - Manage stock\nExample: `!stock + 10 123456 Sword`', inline: false },
-        { name: '🎮 Game Categories', value: '`!addgame <name>` - Add game category\n`!removegame <name>` - Remove game\n`!listgames` - List all games\nExample: `!addgame Anime Vanguard`', inline: false },
-        { name: '⚙️ Configuration (Admin Only)', value: '`!concategory <id>` - Set ticket category\n`!conweb <id>` - Set webhook category\n`!conorders <id>` - Set orders log\n`!condone <id>` - Set done log\n`!conshop <id>` - Set shop category\n`!contrade <id>` - Set trade log\n`!contranscript <id>` - Set transcript log\n`!connews <id>` - Set shop news channel', inline: false },
+        { name: '⚙️ Configuration (Admin Only)', value: '`!concategory <id>` - Set ticket category\n`!conweb <id>` - Set webhook category\n`!conorders <id>` - Set orders log\n`!condone <id>` - Set done log\n`!contranscript <id>` - Set transcript log', inline: false },
         { name: '👑 Admin Management (Owner Only)', value: '`!admadm <user_id>` - Add admin\n`!admrem <user_id>` - Remove admin\n`!admlist` - List all admins', inline: false },
-        { name: '✨ Features', value: '✅ Game-based categories\n✅ Anti-duplicate tickets\n✅ 3-step shop verification\n✅ Stock management\n✅ Auto shop news\n✅ Trade logging\n✅ Auto message cleanup\n✅ Webhook integration', inline: false }
+        { name: '✨ Features', value: '✅ Anti-duplicate tickets\n✅ Ticket claim system\n✅ Admin-only confirmation\n✅ Auto message cleanup\n✅ Webhook integration\n✅ Transcript logging', inline: false }
       )
-      .setFooter({ text: 'Made with ❤️ | All features fully functional' })
+      .setFooter({ text: 'Made with ❤️ | Ticket Bot' })
       .setTimestamp();
     message.reply({ embeds: [helpEmbed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 60000));
     message.delete().catch(() => {});
@@ -934,104 +684,40 @@ client.on('messageCreate', async (message) => {
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
 
-    // ========== SHOP BROWSE ==========
+    // ========== CLAIM TICKET ==========
 
-    if (interaction.customId === 'shop_browse') {
-      const guildGames = gameCategories.get(interaction.guild.id) || [];
+    if (interaction.customId === 'claim_ticket') {
+      const isOwner = interaction.user.id === OWNER_ID;
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      const isAdmin = admins.includes(interaction.user.id);
 
-      if (guildGames.length === 0) {
-        return interaction.reply({ content: '❌ No game categories! Ask admin to use `!addgame Game Name`', ephemeral: true });
+      if (!isOwner && !isAdmin) {
+        return interaction.reply({ content: '❌ Only admins can claim tickets!', ephemeral: true });
       }
 
-      const selectOptions = guildGames.slice(0, 25).map(game => ({
-        label: game,
-        description: `Browse ${game} items`,
-        value: game
-      }));
+      const ticketId = interaction.channel.id;
+      const alreadyClaimed = ticketClaims.get(ticketId);
 
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('shop_select_game')
-        .setPlaceholder('🎮 Select a game category')
-        .addOptions(selectOptions);
-
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-
-      await interaction.reply({ 
-        content: '🎮 **What game are you looking for?**\nSelect a category below:', 
-        components: [row], 
-        ephemeral: true 
-      });
-    }
-
-    // ========== SHOP MANAGE ==========
-
-    if (interaction.customId === 'shop_manage') {
-      const addButton = new ButtonBuilder().setCustomId('shop_add').setLabel('Add Item').setEmoji('➕').setStyle(ButtonStyle.Success);
-      const removeButton = new ButtonBuilder().setCustomId('shop_remove').setLabel('Remove Item').setEmoji('➖').setStyle(ButtonStyle.Danger);
-      const changeButton = new ButtonBuilder().setCustomId('shop_change').setLabel('Change Item').setEmoji('✏️').setStyle(ButtonStyle.Primary);
-      const row = new ActionRowBuilder().addComponents(addButton, removeButton, changeButton);
-      interaction.reply({ content: '🛒 **Manage Shop**\nChoose action:', components: [row], ephemeral: true });
-    }
-
-    // ========== SHOP ADD ==========
-
-    if (interaction.customId === 'shop_add') {
-      const guildGames = gameCategories.get(interaction.guild.id) || [];
-
-      if (guildGames.length === 0) {
-        return interaction.reply({ content: '❌ No game categories! Ask admin to use `!addgame Game Name`', ephemeral: true });
+      if (alreadyClaimed) {
+        return interaction.reply({ content: `❌ This ticket has already been claimed by <@${alreadyClaimed}>!`, ephemeral: true });
       }
 
-      const selectOptions = guildGames.slice(0, 25).map(game => ({
-        label: game,
-        description: `Add item to ${game}`,
-        value: game
-      }));
+      ticketClaims.set(ticketId, interaction.user.id);
+      await saveData();
 
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('shop_add_select_game')
-        .setPlaceholder('🎮 Select game category for your item')
-        .addOptions(selectOptions);
+      const claimEmbed = new EmbedBuilder()
+        .setColor('#00FF00')
+        .setTitle('🎯 Ticket Claimed')
+        .setDescription(`**${interaction.user}** has claimed this ticket!`)
+        .setTimestamp();
 
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-
-      await interaction.reply({ 
-        content: '🎮 **Which game is this item for?**', 
-        components: [row], 
-        ephemeral: true 
+      await interaction.update({ 
+        content: `${interaction.user} has claimed this ticket!`, 
+        embeds: [claimEmbed],
+        components: [] 
       });
-    }
 
-    // ========== SHOP REMOVE ==========
-
-    if (interaction.customId === 'shop_remove') {
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const userItems = guildShops.get(interaction.user.id) || [];
-      if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
-      const selectOptions = userItems.slice(0, 25).map(item => ({
-        label: `${item.name} (Stock: ${item.stock || 0})`,
-        description: `${item.gameCategory || 'No category'} - Price: ${item.price}`,
-        value: item.id
-      }));
-      const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_remove_select').setPlaceholder('Select item to remove').addOptions(selectOptions);
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ content: '🗑️ Select item:', components: [row], ephemeral: true });
-    }
-
-    // ========== SHOP CHANGE ==========
-
-    if (interaction.customId === 'shop_change') {
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const userItems = guildShops.get(interaction.user.id) || [];
-      if (userItems.length === 0) return interaction.reply({ content: '❌ No items!', ephemeral: true });
-      const selectOptions = userItems.slice(0, 25).map(item => ({
-        label: `${item.name} (Stock: ${item.stock || 0})`,
-        description: `${item.gameCategory || 'No category'} - Price: ${item.price}`,
-        value: item.id
-      }));
-      const selectMenu = new StringSelectMenuBuilder().setCustomId('shop_change_select').setPlaceholder('Select item to edit').addOptions(selectOptions);
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-      interaction.reply({ content: '✏️ Select item:', components: [row], ephemeral: true });
+      await interaction.channel.send(`🎯 **Admin ${interaction.user} has claimed this ticket and will be assisting you!**`);
     }
 
     // ========== CREATE TICKET ==========
@@ -1050,32 +736,10 @@ client.on('interactionCreate', async (interaction) => {
       await interaction.showModal(modal);
     }
 
-    // ========== SHOP CONFIRM REMOVE ==========
-
-    if (interaction.customId.startsWith('shop_confirm_remove_')) {
-      const itemId = interaction.customId.replace('shop_confirm_remove_', '');
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-      const itemIndex = userItems.findIndex(i => i.id === itemId);
-      if (itemIndex === -1) return interaction.update({ content: '❌ Not found!', components: [] });
-      const itemName = userItems[itemIndex].name;
-      userItems.splice(itemIndex, 1);
-      guildShops.set(interaction.user.id, userItems);
-      shopListings.set(interaction.guild.id, guildShops);
-      await saveData();
-      interaction.update({ content: `✅ Removed **${itemName}**!`, components: [] });
-    }
-
-    // ========== SHOP CANCEL REMOVE ==========
-
-    if (interaction.customId === 'shop_cancel_remove') {
-      interaction.update({ content: '❌ Cancelled.', components: [] });
-    }
-
     // ========== CLOSE TICKET ==========
 
     if (interaction.customId === 'close_ticket') {
-      if (!interaction.channel.name.startsWith('ticket-') && !interaction.channel.name.startsWith('shop-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
+      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
       await interaction.reply('🔒 Closing in 5 seconds...');
       setTimeout(async () => {
         const ticketId = interaction.channel.id;
@@ -1086,6 +750,7 @@ client.on('interactionCreate', async (interaction) => {
         }
         ticketChannels.delete(ticketId);
         ticketOwners.delete(ticketId);
+        ticketClaims.delete(ticketId);
         await saveData();
         await interaction.channel.delete().catch(console.error);
       }, 5000);
@@ -1127,10 +792,21 @@ client.on('interactionCreate', async (interaction) => {
     // ========== CONFIRM DONE ==========
 
     if (interaction.customId === 'confirm_done') {
-      const isOwner = interaction.user.id === OWNER_ID;
-      const admins = adminUsers.get(interaction.guild.id) || [];
-      const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+      const ticketId = interaction.channel.id;
+      const claimedBy = ticketClaims.get(ticketId);
+
+      // Check if ticket was claimed and if the current user is the one who claimed it
+      if (claimedBy && claimedBy !== interaction.user.id) {
+        return interaction.reply({ content: `❌ Only <@${claimedBy}> (who claimed this ticket) can confirm!`, ephemeral: true });
+      }
+
+      // If not claimed, allow any admin
+      if (!claimedBy) {
+        const isOwner = interaction.user.id === OWNER_ID;
+        const admins = adminUsers.get(interaction.guild.id) || [];
+        const isAdmin = admins.includes(interaction.user.id);
+        if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+      }
 
       const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
       const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
@@ -1185,7 +861,6 @@ client.on('interactionCreate', async (interaction) => {
       }
       await interaction.update({ content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, components: [] });
       setTimeout(async () => {
-        const ticketId = interaction.channel.id;
         const createdChannels = ticketChannels.get(ticketId) || [];
         for (const channelId of createdChannels) {
           const channelToDelete = interaction.guild.channels.cache.get(channelId);
@@ -1193,6 +868,7 @@ client.on('interactionCreate', async (interaction) => {
         }
         ticketChannels.delete(ticketId);
         ticketOwners.delete(ticketId);
+        ticketClaims.delete(ticketId);
         await saveData();
         await interaction.channel.delete().catch(console.error);
       }, 5000);
@@ -1201,44 +877,23 @@ client.on('interactionCreate', async (interaction) => {
     // ========== DENY DONE ==========
 
     if (interaction.customId === 'deny_done') {
-      const isOwner = interaction.user.id === OWNER_ID;
-      const admins = adminUsers.get(interaction.guild.id) || [];
-      const isAdmin = admins.includes(interaction.user.id);
-      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-      await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
-    }
+      const ticketId = interaction.channel.id;
+      const claimedBy = ticketClaims.get(ticketId);
 
-    // ========== SHOP TRADE DONE ==========
-
-    if (interaction.customId.startsWith('shop_trade_done_')) {
-      const parts = interaction.customId.replace('shop_trade_done_', '').split('_');
-      const sellerId = parts[0];
-      const itemId = parts[1];
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const sellerItems = guildShops.get(sellerId) || [];
-      const item = sellerItems.find(i => i.id === itemId);
-      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-      item.stock = Math.max(0, (item.stock || 0) - 1);
-      guildShops.set(sellerId, sellerItems);
-      shopListings.set(interaction.guild.id, guildShops);
-      await saveData();
-      const tradeChannelId = tradeChannels.get(interaction.guild.id);
-      if (tradeChannelId) {
-        const tradeChannel = interaction.guild.channels.cache.get(tradeChannelId);
-        if (tradeChannel) {
-          const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
-          const tradeEmbed = new EmbedBuilder()
-            .setColor('#00FF7F')
-            .setTitle('✅ Trade Completed')
-            .setDescription(`**Item:** ${item.name}\n**Game:** ${item.gameCategory || 'N/A'}\n**Price:** ${item.price}\n**Seller:** ${seller ? seller : `<@${sellerId}>`}\n**Buyer:** ${interaction.user}\n\n**Remaining Stock:** ${item.stock}`)
-            .setTimestamp();
-          await tradeChannel.send({ embeds: [tradeEmbed] });
-        }
+      // Check if ticket was claimed and if the current user is the one who claimed it
+      if (claimedBy && claimedBy !== interaction.user.id) {
+        return interaction.reply({ content: `❌ Only <@${claimedBy}> (who claimed this ticket) can deny!`, ephemeral: true });
       }
-      await interaction.update({ content: `✅ Trade done! Stock: **${item.stock}**. Closing in 5 seconds...`, components: [] });
-      setTimeout(async () => {
-        await interaction.channel.delete().catch(console.error);
-      }, 5000);
+
+      // If not claimed, allow any admin
+      if (!claimedBy) {
+        const isOwner = interaction.user.id === OWNER_ID;
+        const admins = adminUsers.get(interaction.guild.id) || [];
+        const isAdmin = admins.includes(interaction.user.id);
+        if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+      }
+
+      await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
     }
   }
 
@@ -1266,9 +921,30 @@ client.on('interactionCreate', async (interaction) => {
         if (staffRole) {
           await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
         }
+
+        // Add owner and admin permissions
+        try {
+          await interaction.guild.members.fetch(OWNER_ID);
+          await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        } catch (err) {
+          console.log('⚠️ Owner not in guild');
+        }
+
+        const admins = adminUsers.get(interaction.guild.id) || [];
+        for (const adminId of admins) {
+          try {
+            await interaction.guild.members.fetch(adminId);
+            await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+          } catch (err) {
+            console.log(`⚠️ Admin ${adminId} not in guild`);
+          }
+        }
+
+        const claimButton = new ButtonBuilder().setCustomId('claim_ticket').setLabel('Claim Ticket').setEmoji('🎯').setStyle(ButtonStyle.Primary);
         const doneButton = new ButtonBuilder().setCustomId('done_ticket').setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
         const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
+        const row = new ActionRowBuilder().addComponents(claimButton, doneButton, closeButton);
+
         await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
         ticketOwners.set(ticketChannel.id, interaction.user.id);
         saveData();
@@ -1295,250 +971,6 @@ client.on('interactionCreate', async (interaction) => {
       } catch (err) {
         console.error(err);
         interaction.reply({ content: '❌ Failed to create ticket!', ephemeral: true });
-      }
-    }
-
-    // ========== SHOP ADD MODAL ==========
-
-    if (interaction.customId.startsWith('shop_add_modal_')) {
-      const gameCategory = interaction.customId.replace('shop_add_modal_', '');
-      const itemName = interaction.fields.getTextInputValue('item_name');
-      const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
-      const itemPrice = interaction.fields.getTextInputValue('item_price');
-      if (isNaN(itemStock) || itemStock < 0) return interaction.reply({ content: '❌ Invalid stock!', ephemeral: true });
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-      const itemId = `${Date.now()}`;
-      userItems.push({ id: itemId, name: itemName, price: itemPrice, stock: itemStock, seller: interaction.user.tag, gameCategory: gameCategory });
-      guildShops.set(interaction.user.id, userItems);
-      shopListings.set(interaction.guild.id, guildShops);
-      await saveData();
-
-      const newsChannelId = shopNews.get(interaction.guild.id);
-      if (newsChannelId) {
-        const newsChannel = interaction.guild.channels.cache.get(newsChannelId);
-        if (newsChannel) {
-          const newsEmbed = new EmbedBuilder()
-            .setColor('#00FF00')
-            .setTitle('🆕 New Item Added to Shop!')
-            .setDescription(`**${itemName}** is now available!\n\n🎮 **Game:** ${gameCategory}\n💰 **Price:** ${itemPrice}\n📦 **Stock:** ${itemStock}\n👤 **Seller:** ${interaction.user}`)
-            .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-            .setTimestamp()
-            .setFooter({ text: 'Shop System' });
-
-          try {
-            const sentMessage = await newsChannel.send({ embeds: [newsEmbed] });
-            await sentMessage.react('🛍️');
-          } catch (err) {
-            console.error('Error sending to shop news channel:', err);
-          }
-        }
-      }
-
-      interaction.reply({ content: `✅ Added **${itemName}** to **${gameCategory}** for **${itemPrice}** with **${itemStock}** stock!`, ephemeral: true });
-    }
-
-    // ========== SHOP CHANGE MODAL ==========
-
-    if (interaction.customId.startsWith('shop_change_modal_')) {
-      const itemId = interaction.customId.replace('shop_change_modal_', '');
-      const itemName = interaction.fields.getTextInputValue('item_name');
-      const itemStock = parseInt(interaction.fields.getTextInputValue('item_stock'));
-      const itemPrice = interaction.fields.getTextInputValue('item_price');
-      if (isNaN(itemStock) || itemStock < 0) return interaction.reply({ content: '❌ Invalid stock!', ephemeral: true });
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-      const itemIndex = userItems.findIndex(i => i.id === itemId);
-      if (itemIndex === -1) return interaction.reply({ content: '❌ Not found!', ephemeral: true });
-      userItems[itemIndex].name = itemName;
-      userItems[itemIndex].price = itemPrice;
-      userItems[itemIndex].stock = itemStock;
-      guildShops.set(interaction.user.id, userItems);
-      shopListings.set(interaction.guild.id, guildShops);
-      await saveData();
-      interaction.reply({ content: `✅ Updated **${itemName}** - Price: **${itemPrice}**, Stock: **${itemStock}**`, ephemeral: true });
-    }
-  }
-
-  // ==================== SELECT MENU INTERACTIONS ====================
-
-  if (interaction.isStringSelectMenu()) {
-
-    // ========== SHOP SELECT GAME ==========
-
-    if (interaction.customId === 'shop_select_game') {
-      const selectedGame = interaction.values[0];
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-
-      const selectOptions = [];
-      let optionCount = 0;
-
-      for (const [userId, items] of guildShops) {
-        const user = await interaction.client.users.fetch(userId).catch(() => null);
-        const userName = user ? user.username : 'Unknown';
-
-        for (const item of items) {
-          if (item.gameCategory === selectedGame && (item.stock || 0) > 0 && optionCount < 25) {
-            selectOptions.push({ 
-              label: `${item.name} - ${item.price} (Stock: ${item.stock || 0})`, 
-              description: `Seller: ${userName}`, 
-              value: `${userId}-${item.id}` 
-            });
-            optionCount++;
-          }
-        }
-      }
-
-      if (selectOptions.length === 0) {
-        return interaction.update({ content: `❌ No items in stock for **${selectedGame}**!`, components: [] });
-      }
-
-      const selectMenu = new StringSelectMenuBuilder()
-        .setCustomId('shop_select_item')
-        .setPlaceholder('Select an item')
-        .addOptions(selectOptions);
-
-      const row = new ActionRowBuilder().addComponents(selectMenu);
-
-      await interaction.update({ 
-        content: `🎮 **${selectedGame} Items:**\nSelect an item below:`, 
-        components: [row] 
-      });
-    }
-
-    // ========== SHOP ADD SELECT GAME ==========
-
-    if (interaction.customId === 'shop_add_select_game') {
-      const selectedGame = interaction.values[0];
-
-      const modal = new ModalBuilder()
-        .setCustomId(`shop_add_modal_${selectedGame}`)
-        .setTitle(`Add Item to ${selectedGame}`);
-
-      const nameInput = new TextInputBuilder()
-        .setCustomId('item_name')
-        .setLabel('Item Name')
-        .setPlaceholder('e.g., Diamond Sword')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const stockInput = new TextInputBuilder()
-        .setCustomId('item_stock')
-        .setLabel('Stock')
-        .setPlaceholder('e.g., 10')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const priceInput = new TextInputBuilder()
-        .setCustomId('item_price')
-        .setLabel('Price')
-        .setPlaceholder('e.g., 100')
-        .setStyle(TextInputStyle.Short)
-        .setRequired(true);
-
-      const row1 = new ActionRowBuilder().addComponents(nameInput);
-      const row2 = new ActionRowBuilder().addComponents(stockInput);
-      const row3 = new ActionRowBuilder().addComponents(priceInput);
-
-      modal.addComponents(row1, row2, row3);
-      await interaction.showModal(modal);
-    }
-
-    // ========== SHOP REMOVE SELECT ==========
-
-    if (interaction.customId === 'shop_remove_select') {
-      const itemId = interaction.values[0];
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      let userItems = guildShops.get(interaction.user.id) || [];
-      const item = userItems.find(i => i.id === itemId);
-      if (!item) return interaction.reply({ content: '❌ Not found!', ephemeral: true });
-      const confirmButton = new ButtonBuilder().setCustomId(`shop_confirm_remove_${itemId}`).setLabel('Confirm').setStyle(ButtonStyle.Danger);
-      const cancelButton = new ButtonBuilder().setCustomId('shop_cancel_remove').setLabel('Cancel').setStyle(ButtonStyle.Secondary);
-      const row = new ActionRowBuilder().addComponents(confirmButton, cancelButton);
-      interaction.update({ content: `⚠️ Remove **${item.name}** from **${item.gameCategory || 'Unknown'}**?`, components: [row] });
-    }
-
-    // ========== SHOP CHANGE SELECT ==========
-
-    if (interaction.customId === 'shop_change_select') {
-      const itemId = interaction.values[0];
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const userItems = guildShops.get(interaction.user.id) || [];
-      const item = userItems.find(i => i.id === itemId);
-      if (!item) return interaction.reply({ content: '❌ Not found!', ephemeral: true });
-      const modal = new ModalBuilder().setCustomId(`shop_change_modal_${itemId}`).setTitle('Edit Item');
-      const nameInput = new TextInputBuilder().setCustomId('item_name').setLabel('Item Name').setValue(item.name).setStyle(TextInputStyle.Short).setRequired(true);
-      const stockInput = new TextInputBuilder().setCustomId('item_stock').setLabel('Stock').setValue(String(item.stock || 0)).setStyle(TextInputStyle.Short).setRequired(true);
-      const priceInput = new TextInputBuilder().setCustomId('item_price').setLabel('Price').setValue(item.price).setStyle(TextInputStyle.Short).setRequired(true);
-      const row1 = new ActionRowBuilder().addComponents(nameInput);
-      const row2 = new ActionRowBuilder().addComponents(stockInput);
-      const row3 = new ActionRowBuilder().addComponents(priceInput);
-      modal.addComponents(row1, row2, row3);
-      await interaction.showModal(modal);
-    }
-
-    // ========== SHOP SELECT ITEM ==========
-
-    if (interaction.customId === 'shop_select_item') {
-      const [sellerId, itemId] = interaction.values[0].split('-');
-      const guildShops = shopListings.get(interaction.guild.id) || new Map();
-      const sellerItems = guildShops.get(sellerId) || [];
-      const item = sellerItems.find(i => i.id === itemId);
-      if (!item) return interaction.reply({ content: '❌ Item not found!', ephemeral: true });
-      if ((item.stock || 0) <= 0) return interaction.reply({ content: '❌ Out of stock!', ephemeral: true });
-      const seller = await interaction.client.users.fetch(sellerId).catch(() => null);
-      const buyer = interaction.user;
-      const categoryId = shopCategories.get(interaction.guild.id) || ticketCategories.get(interaction.guild.id);
-      if (!categoryId) return interaction.reply({ content: '❌ Shop category not set! Ask admin to use !conshop', ephemeral: true });
-      try {
-        const ticketChannel = await interaction.guild.channels.create({
-          name: `shop-${buyer.username}-${seller ? seller.username : 'seller'}`,
-          type: ChannelType.GuildText,
-          parent: categoryId,
-          permissionOverwrites: [
-            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: buyer.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-            { id: sellerId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-          ],
-        });
-        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
-        if (staffRole) {
-          await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        }
-
-        // Add owner permissions
-        try {
-          await interaction.guild.members.fetch(OWNER_ID);
-          await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        } catch (err) {
-          console.log('⚠️ Owner not in guild');
-        }
-
-        // Add admin permissions
-        const admins = adminUsers.get(interaction.guild.id) || [];
-        for (const adminId of admins) {
-          try {
-            await interaction.guild.members.fetch(adminId);
-            await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-          } catch (err) {
-            console.log(`⚠️ Admin ${adminId} not in guild`);
-          }
-        }
-
-        const doneButton = new ButtonBuilder().setCustomId(`shop_trade_done_${sellerId}_${itemId}`).setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder().addComponents(doneButton, closeButton);
-        const itemEmbed = new EmbedBuilder()
-          .setColor('#FFD700')
-          .setTitle('🛍️ Shop Transaction')
-          .setDescription(`**Buyer:** ${buyer}\n**Seller:** <@${sellerId}>\n\n🎮 **Game:** ${item.gameCategory || 'N/A'}\n**Item:** ${item.name}\n**Price:** ${item.price}\n**Stock:** ${item.stock}`)
-          .setTimestamp();
-        await ticketChannel.send({ content: `${buyer} <@${sellerId}>`, embeds: [itemEmbed], components: [row] });
-        interaction.update({ content: `✅ Shop ticket created! <#${ticketChannel.id}>`, components: [] });
-      } catch (err) {
-        console.error('Shop Ticket Error:', err);
-        interaction.reply({ content: '❌ Failed to create shop ticket!', ephemeral: true });
       }
     }
   }
