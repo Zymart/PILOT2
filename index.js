@@ -1,4 +1,72 @@
-// Fix for ReadableStream error in Replit
+// ==================== MODAL SUBMISSIONS ====================
+
+  if (interaction.isModalSubmit()) {
+
+    // ========== ADMIN PRICE MODAL ==========
+
+    if (interaction.customId.startsWith('admin_price_modal_')) {
+      await interaction.deferReply({ ephemeral: true });
+
+      const gameName = interaction.customId.replace('admin_price_modal_', '');
+      const newPriceList = interaction.fields.getTextInputValue('price_list');
+      const changeLog = interaction.fields.getTextInputValue('change_log');
+
+      // Get old prices
+      const guildPrices = gamePrices.get(interaction.guild.id) || new Map();
+      const oldPrices = guildPrices.get(gameName) || '';
+
+      // Save new prices
+      guildPrices.set(gameName, newPriceList);
+      gamePrices.set(interaction.guild.id, guildPrices);
+      await saveData();
+
+      await interaction.editReply({ content: `✅ Updated prices for **${gameName}**!` });
+
+      // Announce update in update channel
+      const updateChannelId = updateChannels.get(interaction.guild.id);
+      if (updateChannelId) {
+        const updateChannel = interaction.guild.channels.cache.get(updateChannelId);
+        if (updateChannel) {
+          // Determine change type
+          let changeType = '';
+          let changeEmoji = '';
+
+          if (!oldPrices || oldPrices.trim() === '') {
+            changeType = 'New Price List Added';
+            changeEmoji = '🆕';
+          } else {
+            changeType = 'Price List Updated';
+            changeEmoji = '📝';
+          }
+
+          const updateEmbed = new EmbedBuilder()
+            .setColor('#00FF00')
+            .setAuthor({ name: `${changeEmoji} ${changeType}`, iconURL: interaction.user.displayAvatarURL() })
+            .setTitle(`🎮 ${gameName}`)
+            .setDescription(`${interaction.user} has updated the price list!`)
+            .addFields(
+              { name: '📋 What Changed?', value: `\`\`\`\n${changeLog}\n\`\`\``, inline: false },
+              { name: '💰 Updated Price List', value: `\`\`\`\n${newPriceList}\n\`\`\``, inline: false }
+            )
+            .setFooter({ text: `Updated by ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
+            .setTimestamp();
+
+          try {
+            const sentMessage = await updateChannel.send({ 
+              content: '@everyone', 
+              embeds: [updateEmbed], 
+              allowedMentions: { parse: ['everyone'] } 
+            });
+            await sentMessage.react('💰');
+            await sentMessage.react('✅');
+          } catch (err) {
+            console.error('Error sending update notification:', err);
+          }
+        }
+      }
+    }
+
+    // ========== TICKET MODAL ==========// Fix for ReadableStream error in Replit
 if (!global.ReadableStream) {
   global.ReadableStream = require('stream/web').ReadableStream;
 }
@@ -76,7 +144,16 @@ async function saveData() {
     webCategories: Object.fromEntries(webCategories),
     ticketOwners: Object.fromEntries(ticketOwners),
     transcriptChannels: Object.fromEntries(transcriptChannels),
-    ticketClaims: Object.fromEntries(ticketClaims)
+    ticketClaims: Object.fromEntries(ticketClaims),
+    priceListGames: Object.fromEntries(priceListGames),
+    priceListMessages: Object.fromEntries(priceListMessages),
+    gamePrices: Object.fromEntries(
+      Array.from(gamePrices.entries()).map(([guildId, gameMap]) => [
+        guildId,
+        Object.fromEntries(gameMap)
+      ])
+    ),
+    updateChannels: Object.fromEntries(updateChannels)
   };
 
   return new Promise((resolve) => {
@@ -125,7 +202,11 @@ function parseData(data) {
     webCategories: new Map(Object.entries(data.webCategories || {})),
     ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
     transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
-    ticketClaims: new Map(Object.entries(data.ticketClaims || {}))
+    ticketClaims: new Map(Object.entries(data.ticketClaims || {})),
+    priceListGames: new Map(Object.entries(data.priceListGames || {}).map(([k, v]) => [k, v || []])),
+    priceListMessages: new Map(Object.entries(data.priceListMessages || {})),
+    gamePrices: new Map(Object.entries(data.gamePrices || {}).map(([guildId, gameMap]) => [guildId, new Map(Object.entries(gameMap || {}))])),
+    updateChannels: new Map(Object.entries(data.updateChannels || {}))
   };
 }
 
@@ -139,7 +220,11 @@ function getEmptyData() {
     webCategories: new Map(),
     ticketOwners: new Map(),
     transcriptChannels: new Map(),
-    ticketClaims: new Map()
+    ticketClaims: new Map(),
+    priceListGames: new Map(),
+    priceListMessages: new Map(),
+    gamePrices: new Map(),
+    updateChannels: new Map()
   };
 }
 
@@ -153,6 +238,10 @@ let webCategories = new Map();
 let ticketOwners = new Map();
 let transcriptChannels = new Map();
 let ticketClaims = new Map();
+let priceListGames = new Map();
+let priceListMessages = new Map();
+let gamePrices = new Map();
+let updateChannels = new Map();
 
 // ==================== BOT READY ====================
 
@@ -168,6 +257,10 @@ client.once('ready', async () => {
   ticketOwners = loadedData.ticketOwners;
   transcriptChannels = loadedData.transcriptChannels;
   ticketClaims = loadedData.ticketClaims || new Map();
+  priceListGames = loadedData.priceListGames || new Map();
+  priceListMessages = loadedData.priceListMessages || new Map();
+  gamePrices = loadedData.gamePrices || new Map();
+  updateChannels = loadedData.updateChannels || new Map();
   console.log('✅ Data loaded from cloud storage');
 
   setInterval(async () => {
@@ -622,41 +715,298 @@ client.on('messageCreate', async (message) => {
     await message.delete().catch(() => {});
   }
 
-  // ========== TICKET PANEL ==========
+  // ========== ADD TICKET COMMAND ==========
 
-  if (command === 'ticket') {
-    const fullText = args.join(' ');
-    if (!fullText) return message.reply('Usage: `!ticket Title\nDescription`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const lines = fullText.split('\n');
-    const title = lines[0];
-    const text = lines.slice(1).join('\n');
+  if (command === 'addticket') {
+    if (!message.channel.name.startsWith('ticket-')) return message.reply('❌ Only in tickets!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const isOwner = message.author.id === OWNER_ID;
+    const admins = adminUsers.get(message.guild.id) || [];
+    const isAdmin = admins.includes(message.author.id);
+
+    if (!isOwner && !isAdmin) {
+      return message.reply('❌ Only admins can use this command!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    const ticketOwnerName = message.channel.name.replace('ticket-', '');
+    const ticketOwner = message.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
+    if (!ticketOwner) {
+      return message.reply('❌ Ticket owner not found!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    const categoryId = ticketCategories.get(message.guild.id);
+    if (!categoryId) {
+      return message.reply('❌ Ticket category not configured!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    // Count existing tickets for this user
+    const existingTickets = message.guild.channels.cache.filter(ch => 
+      ch.name.startsWith(`ticket-${ticketOwnerName.toLowerCase()}`) && 
+      ch.parentId === categoryId
+    );
+
+    const ticketNumber = existingTickets.size + 1;
+    const newTicketName = `ticket-${ticketOwnerName.toLowerCase()}-${ticketNumber}`;
+
+    try {
+      const newTicketChannel = await message.guild.channels.create({
+        name: newTicketName,
+        type: ChannelType.GuildText,
+        parent: categoryId,
+        permissionOverwrites: [
+          { id: message.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: ticketOwner.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+          { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+        ],
+      });
+
+      const staffRole = message.guild.roles.cache.find(r => 
+        r.name.toLowerCase().includes('staff') || 
+        r.name.toLowerCase().includes('admin') || 
+        r.name.toLowerCase().includes('mod')
+      );
+
+      if (staffRole) {
+        await newTicketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+      }
+
+      // Add owner permissions
+      try {
+        await message.guild.members.fetch(OWNER_ID);
+        await newTicketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+      } catch (err) {
+        console.log('⚠️ Owner not in guild');
+      }
+
+      // Add admin permissions
+      const guildAdmins = adminUsers.get(message.guild.id) || [];
+      for (const adminId of guildAdmins) {
+        try {
+          await message.guild.members.fetch(adminId);
+          await newTicketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
+        } catch (err) {
+          console.log(`⚠️ Admin ${adminId} not in guild`);
+        }
+      }
+
+      const claimButton = new ButtonBuilder().setCustomId('claim_ticket').setLabel('Claim Ticket').setEmoji('🎯').setStyle(ButtonStyle.Primary);
+      const doneButton = new ButtonBuilder().setCustomId('done_ticket').setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
+      const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
+      const row = new ActionRowBuilder().addComponents(claimButton, doneButton, closeButton);
+
+      await newTicketChannel.send({ 
+        content: `${ticketOwner.user}\n\n🎫 **Additional Ticket #${ticketNumber}**\n\n**Created by:** ${message.author}\n**For:** ${ticketOwner.user.tag}\n\nThis is an additional ticket for the same user.`, 
+        components: [row] 
+      });
+
+      ticketOwners.set(newTicketChannel.id, ticketOwner.id);
+      await saveData();
+
+      message.reply(`✅ Created additional ticket: <#${newTicketChannel.id}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+      message.delete().catch(() => {});
+
+      // Notify in order channel if configured
+      const orderChannelId = orderChannels.get(message.guild.id);
+      if (orderChannelId) {
+        const orderChannel = message.guild.channels.cache.get(orderChannelId);
+        if (orderChannel) {
+          const orderTimestamp = Math.floor(Date.now() / 1000);
+          const orderEmbed = new EmbedBuilder()
+            .setColor('#9B59B6')
+            .setAuthor({ name: '➕ Additional Ticket Created', iconURL: message.guild.iconURL() })
+            .setTitle(`Ticket #${ticketNumber} for ${ticketOwner.user.tag}`)
+            .setDescription(`🎉 **New additional ticket created!**\n\n**Customer:** ${ticketOwner.user}\n**Created by:** ${message.author}`)
+            .addFields(
+              { name: '👤 Customer', value: `${ticketOwner.user}`, inline: true },
+              { name: '⏰ Created', value: `<t:${orderTimestamp}:F>`, inline: false }
+            )
+            .setThumbnail(ticketOwner.user.displayAvatarURL({ size: 256 }))
+            .setTimestamp();
+          await orderChannel.send({ embeds: [orderEmbed] });
+        }
+      }
+    } catch (err) {
+      console.error('AddTicket Error:', err);
+      message.reply('❌ Failed to create additional ticket!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+  }
+
+  // ========== PING UPDATE CHANNEL ==========
+
+  if (command === 'pingupdate') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channelId = args[0];
+    if (!channelId) return message.reply('Usage: `!pingupdate CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channel = message.guild.channels.cache.get(channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    updateChannels.set(message.guild.id, channelId);
+    await saveData();
+    message.reply(`✅ Update notification channel set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  // ========== ADMIN PANEL ==========
+
+  if (command === 'adminpanel') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
 
     const embed = new EmbedBuilder()
-      .setColor('#00FFFF')
-      .setAuthor({ name: 'Support Ticket System', iconURL: message.guild.iconURL() })
-      .setTitle(`🎫 ${title}`)
-      .setDescription(text || 'Click the button below to create a support ticket')
-      .addFields({ name: '📋 What happens next?', value: 'Our team will assist you shortly', inline: false })
+      .setColor('#FF6B35')
+      .setAuthor({ name: 'Admin Price List Panel', iconURL: message.guild.iconURL() })
+      .setTitle('🔧 Admin Controls')
+      .setDescription('Click "Edit Prices" to manage game prices.')
       .setThumbnail(message.guild.iconURL())
-      .setFooter({ text: 'Click below to get started' })
+      .setFooter({ text: 'Admin Panel' })
       .setTimestamp();
 
-    const button = new ButtonBuilder()
-      .setCustomId('create_ticket')
-      .setLabel('Create a Ticket')
-      .setEmoji('🎫')
+    const editButton = new ButtonBuilder()
+      .setCustomId('admin_edit_prices')
+      .setLabel('Edit Prices')
+      .setEmoji('✏️')
       .setStyle(ButtonStyle.Primary);
 
-    const row = new ActionRowBuilder().addComponents(button);
+    const row = new ActionRowBuilder().addComponents(editButton);
+
     try {
       await message.delete();
-      await message.channel.send('@everyone');
       await message.channel.send({ embeds: [embed], components: [row] });
     } catch (err) {
       console.error(err);
       message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     }
   }
+
+  // ========== PRICE LIST PANEL ==========
+
+  if (command === 'pricelist') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const embed = new EmbedBuilder()
+      .setColor('#FFD700')
+      .setAuthor({ name: 'Price List', iconURL: message.guild.iconURL() })
+      .setTitle('🎮 Select a Game')
+      .setDescription('Click a button below to view prices for that game.')
+      .setThumbnail(message.guild.iconURL())
+      .setFooter({ text: 'Price List System' })
+      .setTimestamp();
+
+    const guildGames = priceListGames.get(message.guild.id) || [];
+
+    if (guildGames.length === 0) {
+      return message.reply('❌ No games added yet! Use `!addlist Game Name` to add one.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    // Create buttons for each game (max 5 per row, max 25 total)
+    const rows = [];
+    let currentRow = new ActionRowBuilder();
+    let buttonCount = 0;
+
+    for (const game of guildGames.slice(0, 25)) {
+      const button = new ButtonBuilder()
+        .setCustomId(`pricelist_${game}`)
+        .setLabel(game)
+        .setStyle(ButtonStyle.Primary);
+
+      currentRow.addComponents(button);
+      buttonCount++;
+
+      if (buttonCount % 5 === 0) {
+        rows.push(currentRow);
+        currentRow = new ActionRowBuilder();
+      }
+    }
+
+    if (currentRow.components.length > 0) {
+      rows.push(currentRow);
+    }
+
+    try {
+      await message.delete();
+      const sentMessage = await message.channel.send({ embeds: [embed], components: rows });
+
+      // Store the message ID so we can update it later
+      priceListMessages.set(message.guild.id, {
+        channelId: message.channel.id,
+        messageId: sentMessage.id
+      });
+      await saveData();
+    } catch (err) {
+      console.error(err);
+      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+  }
+
+  // ========== ADD LIST COMMAND ==========
+
+  if (command === 'addlist') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!addlist Game Name`\nExample: `!addlist Anime Vanguard`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = priceListGames.get(message.guild.id) || [];
+    if (guildGames.includes(gameName)) {
+      return message.reply(`❌ **${gameName}** already exists!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    if (guildGames.length >= 25) {
+      return message.reply('❌ Maximum 25 games allowed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    guildGames.push(gameName);
+    priceListGames.set(message.guild.id, guildGames);
+    await saveData();
+
+    message.reply(`✅ Added game: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+
+    // Update the price list panel if it exists
+    await updatePriceListPanel(message.guild.id);
+  }
+
+  // ========== REMOVE LIST COMMAND ==========
+
+  if (command === 'removelist') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!removelist Game Name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = priceListGames.get(message.guild.id) || [];
+    const index = guildGames.indexOf(gameName);
+    if (index === -1) {
+      return message.reply(`❌ **${gameName}** not found!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+
+    guildGames.splice(index, 1);
+    priceListGames.set(message.guild.id, guildGames);
+    await saveData();
+
+    message.reply(`✅ Removed game: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+
+    // Update the price list panel if it exists
+    await updatePriceListPanel(message.guild.id);
+  }
+
+  // ========== LIST GAMES COMMAND ==========
+
+  if (command === 'listgames') {
+    const guildGames = priceListGames.get(message.guild.id) || [];
+    if (guildGames.length === 0) {
+      return message.reply('📋 No games yet! Use `!addlist Game Name` to add one.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    }
+
+    let gameList = '🎮 **Price List Games:**\n\n';
+    guildGames.forEach((game, index) => {
+      gameList += `${index + 1}. ${game}\n`;
+    });
+    message.reply(gameList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
+    message.delete().catch(() => {});
+  }
+
+  // ========== TICKET PANEL (REMOVED) ==========
+
+  // Removed !ticket command - use !pricelist instead
 
   // ========== HELP COMMAND ==========
 
@@ -679,10 +1029,253 @@ client.on('messageCreate', async (message) => {
   }
 });
 
+// ==================== UPDATE PRICE LIST PANEL ====================
+
+async function updatePriceListPanel(guildId) {
+  const panelData = priceListMessages.get(guildId);
+  if (!panelData) return;
+
+  const guild = client.guilds.cache.get(guildId);
+  if (!guild) return;
+
+  const channel = guild.channels.cache.get(panelData.channelId);
+  if (!channel) return;
+
+  try {
+    const message = await channel.messages.fetch(panelData.messageId);
+    if (!message) return;
+
+    const guildGames = priceListGames.get(guildId) || [];
+
+    const embed = new EmbedBuilder()
+      .setColor('#FFD700')
+      .setAuthor({ name: 'Price List', iconURL: guild.iconURL() })
+      .setTitle('🎮 Select a Game')
+      .setDescription('Click a button below to view prices for that game.')
+      .setThumbnail(guild.iconURL())
+      .setFooter({ text: 'Price List System' })
+      .setTimestamp();
+
+    const rows = [];
+    let currentRow = new ActionRowBuilder();
+    let buttonCount = 0;
+
+    for (const game of guildGames.slice(0, 25)) {
+      const button = new ButtonBuilder()
+        .setCustomId(`pricelist_${game}`)
+        .setLabel(game)
+        .setStyle(ButtonStyle.Primary);
+
+      currentRow.addComponents(button);
+      buttonCount++;
+
+      if (buttonCount % 5 === 0) {
+        rows.push(currentRow);
+        currentRow = new ActionRowBuilder();
+      }
+    }
+
+    if (currentRow.components.length > 0) {
+      rows.push(currentRow);
+    }
+
+    await message.edit({ embeds: [embed], components: rows });
+    console.log('✅ Price list panel updated');
+  } catch (err) {
+    console.error('Error updating price list panel:', err);
+  }
+}
+
 // ==================== BUTTON INTERACTIONS ====================
 
 client.on('interactionCreate', async (interaction) => {
   if (interaction.isButton()) {
+
+    // ========== ADMIN EDIT PRICES ==========
+
+    if (interaction.customId === 'admin_edit_prices') {
+      const isOwner = interaction.user.id === OWNER_ID;
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      const isAdmin = admins.includes(interaction.user.id);
+
+      if (!isOwner && !isAdmin) {
+        return interaction.reply({ content: '❌ Only admins can use this!', ephemeral: true });
+      }
+
+      const guildGames = priceListGames.get(interaction.guild.id) || [];
+
+      if (guildGames.length === 0) {
+        return interaction.reply({ content: '❌ No games added yet! Use `!addlist Game Name` to add one.', ephemeral: true });
+      }
+
+      const rows = [];
+      let currentRow = new ActionRowBuilder();
+      let buttonCount = 0;
+
+      for (const game of guildGames.slice(0, 25)) {
+        const button = new ButtonBuilder()
+          .setCustomId(`admin_edit_game_${game}`)
+          .setLabel(game)
+          .setStyle(ButtonStyle.Secondary);
+
+        currentRow.addComponents(button);
+        buttonCount++;
+
+        if (buttonCount % 5 === 0) {
+          rows.push(currentRow);
+          currentRow = new ActionRowBuilder();
+        }
+      }
+
+      if (currentRow.components.length > 0) {
+        rows.push(currentRow);
+      }
+
+      await interaction.reply({ 
+        content: '📝 **Select a game to edit prices:**', 
+        components: rows, 
+        ephemeral: true 
+      });
+    }
+
+    // ========== ADMIN EDIT SPECIFIC GAME ==========
+
+    if (interaction.customId.startsWith('admin_edit_game_')) {
+      const gameName = interaction.customId.replace('admin_edit_game_', '');
+
+      const modal = new ModalBuilder()
+        .setCustomId(`admin_price_modal_${gameName}`)
+        .setTitle(`Edit ${gameName} Prices`);
+
+      const priceInput = new TextInputBuilder()
+        .setCustomId('price_list')
+        .setLabel('Price List (one per line: Item = Price)')
+        .setPlaceholder('Dio = 250\nGoku = 300\nVegeta = 350')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      const changeLogInput = new TextInputBuilder()
+        .setCustomId('change_log')
+        .setLabel('What did you update?')
+        .setPlaceholder('Added: Dio = 250\nRemoved: Old Item\nUpdated: Goku price from 250 to 300')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      // Get current prices if they exist
+      const guildPrices = gamePrices.get(interaction.guild.id) || new Map();
+      const currentPrices = guildPrices.get(gameName) || '';
+
+      if (currentPrices) {
+        priceInput.setValue(currentPrices);
+      }
+
+      const actionRow1 = new ActionRowBuilder().addComponents(priceInput);
+      const actionRow2 = new ActionRowBuilder().addComponents(changeLogInput);
+      modal.addComponents(actionRow1, actionRow2);
+
+      await interaction.showModal(modal);
+    }
+
+    // ========== PRICE LIST BUTTON (USER SIDE) ==========
+
+    if (interaction.customId.startsWith('pricelist_')) {
+      const gameName = interaction.customId.replace('pricelist_', '');
+
+      // Get prices for this game
+      const guildPrices = gamePrices.get(interaction.guild.id) || new Map();
+      const prices = guildPrices.get(gameName);
+
+      // Check for existing ticket
+      const categoryId = ticketCategories.get(interaction.guild.id);
+      if (!categoryId) return interaction.reply({ content: '❌ Ticket category not configured!', ephemeral: true });
+
+      const category = interaction.guild.channels.cache.get(categoryId);
+      if (!category) return interaction.reply({ content: '❌ Category not found!', ephemeral: true });
+
+      const existingTicket = interaction.guild.channels.cache.find(ch => 
+        ch.name === `ticket-${interaction.user.username.toLowerCase()}` && 
+        ch.parentId === categoryId
+      );
+
+      if (existingTicket) return interaction.reply({ content: `❌ You already have a ticket: <#${existingTicket.id}>`, ephemeral: true });
+
+      if (prices && prices.trim()) {
+        // Show prices in an embed with "Create Ticket" button
+        const priceEmbed = new EmbedBuilder()
+          .setColor('#FFD700')
+          .setAuthor({ name: gameName, iconURL: interaction.guild.iconURL() })
+          .setTitle('💰 Price List')
+          .setDescription(`\`\`\`\n${prices}\n\`\`\``)
+          .setFooter({ text: 'Click "Create Ticket" below to place your order' })
+          .setTimestamp();
+
+        const createTicketButton = new ButtonBuilder()
+          .setCustomId(`create_ticket_${gameName}`)
+          .setLabel('Create Ticket')
+          .setEmoji('🎫')
+          .setStyle(ButtonStyle.Success);
+
+        const row = new ActionRowBuilder().addComponents(createTicketButton);
+
+        await interaction.reply({ embeds: [priceEmbed], components: [row], ephemeral: true });
+      } else {
+        // No prices set yet, show message
+        const noPriceEmbed = new EmbedBuilder()
+          .setColor('#FFA500')
+          .setAuthor({ name: gameName, iconURL: interaction.guild.iconURL() })
+          .setTitle('⚠️ Price List Not Available')
+          .setDescription('The price list for this game hasn\'t been set up yet.\n\nYou can still create a ticket to inquire about pricing!')
+          .setFooter({ text: 'Click "Create Ticket" below' })
+          .setTimestamp();
+
+        const createTicketButton = new ButtonBuilder()
+          .setCustomId(`create_ticket_${gameName}`)
+          .setLabel('Create Ticket')
+          .setEmoji('🎫')
+          .setStyle(ButtonStyle.Primary);
+
+        const row = new ActionRowBuilder().addComponents(createTicketButton);
+
+        await interaction.reply({ embeds: [noPriceEmbed], components: [row], ephemeral: true });
+      }
+    }
+
+    // ========== CREATE TICKET BUTTON ==========
+
+    if (interaction.customId.startsWith('create_ticket_')) {
+      const gameName = interaction.customId.replace('create_ticket_', '');
+
+      const categoryId = ticketCategories.get(interaction.guild.id);
+      if (!categoryId) return interaction.reply({ content: '❌ Ticket category not configured!', ephemeral: true });
+
+      const category = interaction.guild.channels.cache.get(categoryId);
+      if (!category) return interaction.reply({ content: '❌ Category not found!', ephemeral: true });
+
+      const existingTicket = interaction.guild.channels.cache.find(ch => 
+        ch.name === `ticket-${interaction.user.username.toLowerCase()}` && 
+        ch.parentId === categoryId
+      );
+
+      if (existingTicket) return interaction.reply({ content: `❌ You already have a ticket: <#${existingTicket.id}>`, ephemeral: true });
+
+      const modal = new ModalBuilder()
+        .setCustomId(`ticket_modal_${gameName}`)
+        .setTitle(`${gameName} - Create Ticket`);
+
+      const serviceInput = new TextInputBuilder()
+        .setCustomId('service_type')
+        .setLabel('What would you like to order?')
+        .setPlaceholder('Example: Dio, Goku x2, Vegeta')
+        .setStyle(TextInputStyle.Paragraph)
+        .setRequired(true);
+
+      const actionRow = new ActionRowBuilder().addComponents(serviceInput);
+      modal.addComponents(actionRow);
+
+      await interaction.showModal(modal);
+    }
+
+    // ========== CREATE ORDER BUTTON (REMOVED - REPLACED WITH create_ticket_) ==========
 
     // ========== CLAIM TICKET ==========
 
@@ -903,10 +1496,11 @@ client.on('interactionCreate', async (interaction) => {
 
     // ========== TICKET MODAL ==========
 
-    if (interaction.customId === 'ticket_modal') {
+    if (interaction.customId.startsWith('ticket_modal_')) {
       // Defer the reply immediately to avoid timeout
       await interaction.deferReply({ ephemeral: true });
 
+      const gameName = interaction.customId.replace('ticket_modal_', '');
       const serviceDescription = interaction.fields.getTextInputValue('service_type');
       const categoryId = ticketCategories.get(interaction.guild.id);
 
@@ -954,7 +1548,11 @@ client.on('interactionCreate', async (interaction) => {
         const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
         const row = new ActionRowBuilder().addComponents(claimButton, doneButton, closeButton);
 
-        await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
+        await ticketChannel.send({ 
+          content: `@everyone\n\n🎫 **Ticket by ${interaction.user}**\n🎮 **Game:** ${gameName}\n\n**Service Request:**\n${serviceDescription}`, 
+          components: [row], 
+          allowedMentions: { parse: ['everyone'] } 
+        });
 
         ticketOwners.set(ticketChannel.id, interaction.user.id);
         await saveData();
@@ -968,9 +1566,10 @@ client.on('interactionCreate', async (interaction) => {
               .setColor('#FF6B35')
               .setAuthor({ name: '📦 New Order!', iconURL: interaction.guild.iconURL() })
               .setTitle(`Order from ${interaction.user.tag}`)
-              .setDescription(`🎉 **New order placed!**\n\n📋 **Details:**\n${serviceDescription}`)
+              .setDescription(`🎉 **New order placed!**\n\n🎮 **Game:** ${gameName}\n📋 **Details:**\n${serviceDescription}`)
               .addFields(
                 { name: '👤 Customer', value: `${interaction.user}`, inline: true },
+                { name: '🎮 Game', value: `${gameName}`, inline: true },
                 { name: '⏰ Ordered', value: `<t:${orderTimestamp}:F>`, inline: false }
               )
               .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
