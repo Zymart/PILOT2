@@ -508,28 +508,38 @@ client.on('messageCreate', async (message) => {
     }
 
     const embed = new EmbedBuilder()
-      .setColor('#00FFFF')
-      .setTitle('🎮 Game Panel - View Prices & Create Tickets')
-      .setDescription('**Welcome to our game service!**\n\nSelect a game below to view current prices and create a ticket.')
-      .addFields(
-        { name: '📋 Available Games', value: guildGames.join('\n') || 'No games yet', inline: false },
-        { name: '✨ How It Works', value: '1️⃣ Click "View Games" button\n2️⃣ Select your game\n3️⃣ See current prices\n4️⃣ Click "Create Ticket" to order', inline: false }
-      )
-      .setFooter({ text: 'Select a game to get started!' })
+      .setColor('#FF1493')
+      .setTitle('✈️ TMARYZ PILOT SERVICE')
+      .setDescription('━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n**Click a game button below to view prices**\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━')
       .setTimestamp();
 
-    const button = new ButtonBuilder()
-      .setCustomId('view_games')
-      .setLabel('View Games')
-      .setEmoji('🎮')
-      .setStyle(ButtonStyle.Primary);
+    // Create buttons for each game (max 5 per row, max 25 total)
+    const rows = [];
+    let currentRow = new ActionRowBuilder();
+    let buttonCount = 0;
 
-    const row = new ActionRowBuilder().addComponents(button);
+    for (let i = 0; i < guildGames.length && i < 25; i++) {
+      const game = guildGames[i];
+      const button = new ButtonBuilder()
+        .setCustomId(`view_game_${game}`)
+        .setLabel(game)
+        .setStyle(ButtonStyle.Primary);
+
+      currentRow.addComponents(button);
+      buttonCount++;
+
+      // Create new row after 5 buttons or if it's the last game
+      if (buttonCount === 5 || i === guildGames.length - 1) {
+        rows.push(currentRow);
+        currentRow = new ActionRowBuilder();
+        buttonCount = 0;
+      }
+    }
 
     try {
       await message.delete();
       await message.channel.send('@everyone');
-      await message.channel.send({ embeds: [embed], components: [row] });
+      await message.channel.send({ embeds: [embed], components: rows });
     } catch (err) {
       console.error(err);
       message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
@@ -602,7 +612,38 @@ client.on('messageCreate', async (message) => {
 
 client.on('interactionCreate', async (interaction) => {
 
-  // ========== VIEW GAMES BUTTON (PUBLIC PANEL) ==========
+  // ========== VIEW GAME BUTTON (DIRECT GAME BUTTONS) ==========
+
+  if (interaction.isButton() && interaction.customId.startsWith('view_game_')) {
+    const gameName = interaction.customId.replace('view_game_', '');
+    const guildId = interaction.guild.id;
+
+    // Get current prices for this game
+    const currentPrices = gamePrices.get(`${guildId}_${gameName}`) || 'No prices set yet!';
+
+    const embed = new EmbedBuilder()
+      .setColor('#00FFFF')
+      .setTitle(`💰 ${gameName} - Current Prices`)
+      .setDescription('```\n' + currentPrices + '\n```')
+      .setFooter({ text: 'Click below to create a ticket' })
+      .setTimestamp();
+
+    const createTicketButton = new ButtonBuilder()
+      .setCustomId(`create_ticket_${gameName}`)
+      .setLabel('Create Ticket')
+      .setEmoji('🎫')
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(createTicketButton);
+
+    await interaction.reply({
+      embeds: [embed],
+      components: [row],
+      ephemeral: true
+    });
+  }
+
+  // ========== OLD VIEW GAMES BUTTON (KEPT FOR BACKWARD COMPATIBILITY) ==========
 
   if (interaction.isButton() && interaction.customId === 'view_games') {
     const guildGames = gameList.get(interaction.guild.id) || [];
