@@ -3,7 +3,7 @@ if (!global.ReadableStream) {
   global.ReadableStream = require('stream/web').ReadableStream;
 }
 
-const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle } = require('discord.js');
+const { Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits, ModalBuilder, TextInputBuilder, TextInputStyle, StringSelectMenuBuilder } = require('discord.js');
 const https = require('https');
 
 const client = new Client({
@@ -68,14 +68,16 @@ async function saveData() {
   }
 
   const data = {
+    adminUsers: Object.fromEntries(adminUsers),
+    gamePrices: Object.fromEntries(gamePrices),
+    gameList: Object.fromEntries(gameList),
+    announcementChannel: Object.fromEntries(announcementChannel),
     ticketCategories: Object.fromEntries(ticketCategories),
     orderChannels: Object.fromEntries(orderChannels),
     doneChannels: Object.fromEntries(doneChannels),
-    adminUsers: Object.fromEntries(adminUsers),
     ticketChannels: Object.fromEntries(ticketChannels),
     webCategories: Object.fromEntries(webCategories),
     ticketOwners: Object.fromEntries(ticketOwners),
-    transcriptChannels: Object.fromEntries(transcriptChannels),
     ticketClaims: Object.fromEntries(ticketClaims)
   };
 
@@ -117,41 +119,47 @@ async function saveData() {
 
 function parseData(data) {
   return {
+    adminUsers: new Map(Object.entries(data.adminUsers || {})),
+    gamePrices: new Map(Object.entries(data.gamePrices || {})),
+    gameList: new Map(Object.entries(data.gameList || {}).map(([k, v]) => [k, v || []])),
+    announcementChannel: new Map(Object.entries(data.announcementChannel || {})),
     ticketCategories: new Map(Object.entries(data.ticketCategories || {})),
     orderChannels: new Map(Object.entries(data.orderChannels || {})),
     doneChannels: new Map(Object.entries(data.doneChannels || {})),
-    adminUsers: new Map(Object.entries(data.adminUsers || {}).map(([k, v]) => [k, v || []])),
     ticketChannels: new Map(Object.entries(data.ticketChannels || {}).map(([k, v]) => [k, v || []])),
     webCategories: new Map(Object.entries(data.webCategories || {})),
     ticketOwners: new Map(Object.entries(data.ticketOwners || {})),
-    transcriptChannels: new Map(Object.entries(data.transcriptChannels || {})),
     ticketClaims: new Map(Object.entries(data.ticketClaims || {}))
   };
 }
 
 function getEmptyData() {
   return {
+    adminUsers: new Map(),
+    gamePrices: new Map(),
+    gameList: new Map(),
+    announcementChannel: new Map(),
     ticketCategories: new Map(),
     orderChannels: new Map(),
     doneChannels: new Map(),
-    adminUsers: new Map(),
     ticketChannels: new Map(),
     webCategories: new Map(),
     ticketOwners: new Map(),
-    transcriptChannels: new Map(),
     ticketClaims: new Map()
   };
 }
 
 // Global data maps
+let adminUsers = new Map();
+let gamePrices = new Map();
+let gameList = new Map();
+let announcementChannel = new Map();
 let ticketCategories = new Map();
 let orderChannels = new Map();
 let doneChannels = new Map();
-let adminUsers = new Map();
 let ticketChannels = new Map();
 let webCategories = new Map();
 let ticketOwners = new Map();
-let transcriptChannels = new Map();
 let ticketClaims = new Map();
 
 // ==================== BOT READY ====================
@@ -159,14 +167,16 @@ let ticketClaims = new Map();
 client.once('ready', async () => {
   console.log(`✅ Bot is online as ${client.user.tag}`);
   const loadedData = await loadData();
+  adminUsers = loadedData.adminUsers;
+  gamePrices = loadedData.gamePrices;
+  gameList = loadedData.gameList;
+  announcementChannel = loadedData.announcementChannel;
   ticketCategories = loadedData.ticketCategories;
   orderChannels = loadedData.orderChannels;
   doneChannels = loadedData.doneChannels;
-  adminUsers = loadedData.adminUsers;
   ticketChannels = loadedData.ticketChannels;
   webCategories = loadedData.webCategories;
   ticketOwners = loadedData.ticketOwners;
-  transcriptChannels = loadedData.transcriptChannels;
   ticketClaims = loadedData.ticketClaims || new Map();
   console.log('✅ Data loaded from cloud storage');
 
@@ -222,7 +232,7 @@ client.on('messageCreate', async (message) => {
     if (guildAdmins.includes(userId)) return message.reply('❌ This user is already an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     guildAdmins.push(userId);
     adminUsers.set(message.guild.id, guildAdmins);
-    saveData();
+    await saveData();
     const user = await client.users.fetch(userId).catch(() => null);
     message.reply(`✅ Added **${user ? user.tag : userId}** as admin!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     message.delete().catch(() => {});
@@ -237,7 +247,7 @@ client.on('messageCreate', async (message) => {
     if (index === -1) return message.reply('❌ This user is not an admin!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     guildAdmins.splice(index, 1);
     adminUsers.set(message.guild.id, guildAdmins);
-    saveData();
+    await saveData();
     const user = await client.users.fetch(userId).catch(() => null);
     message.reply(`✅ Removed **${user ? user.tag : userId}** from admins!`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     message.delete().catch(() => {});
@@ -256,193 +266,19 @@ client.on('messageCreate', async (message) => {
     message.delete().catch(() => {});
   }
 
-  // Permission check for other commands
-  if (!canUseCommands && command !== 'admadm' && command !== 'admrem' && command !== 'admlist') {
-    const hasModerator = message.member.roles.cache.some(r => 
-      r.name.toLowerCase().includes('moderator') || 
-      r.name.toLowerCase().includes('mod') ||
-      r.permissions.has(PermissionFlagsBits.Administrator)
-    );
-    if (!hasModerator) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+  // ========== CONFIGURATION ==========
+
+  if (command === 'conannounce') {
+    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channelId = args[0];
+    if (!channelId) return message.reply('Usage: `!conannounce CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const channel = message.guild.channels.cache.get(channelId);
+    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    announcementChannel.set(message.guild.id, channelId);
+    await saveData();
+    message.reply(`✅ Announcement channel set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
   }
-
-  // ========== EMBED COMMANDS ==========
-
-  if (command === 'embed') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!embed Your message here`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor('#5865F2')
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: `Designed by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('✨');
-    } catch (err) {
-      console.error(err);
-      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-  }
-
-  if (command === 'fancy') {
-    const fullText = args.join(' ');
-    if (!fullText) return message.reply('Usage: `!fancy Title\nYour message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const lines = fullText.split('\n');
-    const title = lines[0];
-    const text = lines.slice(1).join('\n');
-    const embed = new EmbedBuilder()
-      .setColor('#FF00FF')
-      .setTitle(`✨ ${title} ✨`)
-      .setTimestamp()
-      .setFooter({ text: message.author.username, iconURL: message.author.displayAvatarURL() })
-      .setThumbnail(message.author.displayAvatarURL());
-    if (text.trim()) embed.setDescription(`>>> ${text}`);
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('💖');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'announce') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!announce Your announcement`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor('#FFA500')
-      .setTitle('📢 ANNOUNCEMENT')
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: `Announced by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('📢');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'quote') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!quote Your quote`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor('#2F3136')
-      .setDescription(`*"${text}"*`)
-      .setAuthor({ name: message.author.username, iconURL: message.author.displayAvatarURL() })
-      .setTimestamp();
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('💬');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'colorembed') {
-    const color = args[0];
-    const text = args.slice(1).join(' ');
-    if (!color || !text) return message.reply('Usage: `!colorembed #FF0000 Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder()
-      .setColor(color)
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: message.author.username, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-      message.reply('❌ Invalid color!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    }
-  }
-
-  if (command === 'success') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!success Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder().setColor('#00FF00').setTitle('✅ Success').setDescription(text).setTimestamp();
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'error') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!error Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder().setColor('#FF0000').setTitle('❌ Error').setDescription(text).setTimestamp();
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'info') {
-    const text = args.join(' ');
-    if (!text) return message.reply('Usage: `!info Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const embed = new EmbedBuilder().setColor('#00BFFF').setTitle('ℹ️ Information').setDescription(text).setTimestamp();
-    try {
-      await message.delete();
-      await message.channel.send({ embeds: [embed] });
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  if (command === 'auto') {
-    let text = args.join(' ');
-    if (!text) return message.reply('Usage: `!auto Message`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const fancyFont = (str) => {
-      const normal = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-      const fancy = '𝗔𝗕𝗖𝗗𝗘𝗙𝗚𝗛𝗜𝗝𝗞𝗟𝗠𝗡𝗢𝗣𝗤𝗥𝗦𝗧𝗨𝗩𝗪𝗫𝗬𝗭𝗮𝗯𝗰𝗱𝗲𝗳𝗴𝗵𝗶𝗷𝗸𝗹𝗺𝗻𝗼𝗽𝗾𝗿𝘀𝘁𝘂𝘃𝘄𝘅𝘆𝘇𝟬𝟭𝟮𝟯𝟰𝟱𝟲𝟳𝟴𝟵';
-      return str.split('').map(char => {
-        const index = normal.indexOf(char);
-        return index !== -1 ? fancy[index] : char;
-      }).join('');
-    };
-    text = fancyFont(text);
-    const lines = text.split('\n');
-    const processedLines = lines.map(line => {
-      const l = line.toLowerCase();
-      if (l.includes('service') || l.includes('offer')) return `💸 ${line}`;
-      if (l.includes('pilot')) return `✈️ ${line}`;
-      if (l.includes('broly') || l.includes('strong')) return `💪 ${line}`;
-      if (l.includes('goku') || l.includes('fire')) return `🔥 ${line}`;
-      if (l.includes('vegeta') || l.includes('power')) return `⚡ ${line}`;
-      if (l.includes('php') || l.includes('price') || l.includes('=')) return `💰 ${line}`;
-      if (l.includes('diamond') || l.includes('rare')) return `💎 ${line}`;
-      if (l.includes('premium') || l.includes('vip')) return `👑 ${line}`;
-      if (l.includes('rank') || l.includes('top')) return `🏆 ${line}`;
-      if (l.includes('boost')) return `🚀 ${line}`;
-      if (l.includes('new')) return `🆕 ${line}`;
-      if (l.includes('sale') || l.includes('hot')) return `🔥 ${line}`;
-      if (l.includes('discount')) return `💥 ${line}`;
-      return `✨ ${line}`;
-    });
-    text = processedLines.join('\n');
-    const embed = new EmbedBuilder()
-      .setColor('#FF6B9D')
-      .setDescription(text)
-      .setTimestamp()
-      .setFooter({ text: `Styled by ${message.author.username}`, iconURL: message.author.displayAvatarURL() });
-    try {
-      await message.delete();
-      const sentMessage = await message.channel.send({ embeds: [embed] });
-      await sentMessage.react('✨');
-    } catch (err) {
-      console.error(err);
-    }
-  }
-
-  // ========== CONFIGURATION COMMANDS ==========
 
   if (command === 'concategory') {
     if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
@@ -451,7 +287,7 @@ client.on('messageCreate', async (message) => {
     const category = message.guild.channels.cache.get(categoryId);
     if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     ticketCategories.set(message.guild.id, categoryId);
-    saveData();
+    await saveData();
     message.reply(`✅ Ticket category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     message.delete().catch(() => {});
   }
@@ -463,7 +299,7 @@ client.on('messageCreate', async (message) => {
     const category = message.guild.channels.cache.get(categoryId);
     if (!category || category.type !== ChannelType.GuildCategory) return message.reply('❌ Invalid category!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     webCategories.set(message.guild.id, categoryId);
-    saveData();
+    await saveData();
     message.reply(`✅ Webhook category set to: **${category.name}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     message.delete().catch(() => {});
   }
@@ -475,7 +311,7 @@ client.on('messageCreate', async (message) => {
     const channel = message.guild.channels.cache.get(channelId);
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     orderChannels.set(message.guild.id, channelId);
-    saveData();
+    await saveData();
     message.reply(`✅ Orders log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     message.delete().catch(() => {});
   }
@@ -487,20 +323,60 @@ client.on('messageCreate', async (message) => {
     const channel = message.guild.channels.cache.get(channelId);
     if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
     doneChannels.set(message.guild.id, channelId);
-    saveData();
+    await saveData();
     message.reply(`✅ Done log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
     message.delete().catch(() => {});
   }
 
-  if (command === 'contranscript') {
-    if (!message.member.permissions.has(PermissionFlagsBits.Administrator)) return message.reply('❌ Admin only!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channelId = args[0];
-    if (!channelId) return message.reply('Usage: `!contranscript CHANNEL_ID`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const channel = message.guild.channels.cache.get(channelId);
-    if (!channel || channel.type !== ChannelType.GuildText) return message.reply('❌ Invalid channel!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    transcriptChannels.set(message.guild.id, channelId);
-    saveData();
-    message.reply(`✅ Transcript log set to: <#${channelId}>`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+  // ========== ADD GAME ==========
+
+  if (command === 'addgame') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!addgame Game Name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = gameList.get(message.guild.id) || [];
+    if (guildGames.includes(gameName)) return message.reply('❌ This game already exists!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    guildGames.push(gameName);
+    gameList.set(message.guild.id, guildGames);
+    await saveData();
+
+    message.reply(`✅ Added game: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  // ========== REMOVE GAME ==========
+
+  if (command === 'removegame') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    const gameName = args.join(' ');
+    if (!gameName) return message.reply('Usage: `!removegame Game Name`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = gameList.get(message.guild.id) || [];
+    const index = guildGames.indexOf(gameName);
+    if (index === -1) return message.reply('❌ This game does not exist!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    guildGames.splice(index, 1);
+    gameList.set(message.guild.id, guildGames);
+    await saveData();
+
+    message.reply(`✅ Removed game: **${gameName}**`).then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    message.delete().catch(() => {});
+  }
+
+  // ========== LIST GAMES ==========
+
+  if (command === 'listgames') {
+    const guildGames = gameList.get(message.guild.id) || [];
+    if (guildGames.length === 0) return message.reply('📋 No games added yet! Use `!addgame Game Name` to add one.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+
+    let gamesList = '📋 **Available Games:**\n\n';
+    guildGames.forEach((game, index) => {
+      gamesList += `${index + 1}. ${game}\n`;
+    });
+
+    message.reply(gamesList).then(msg => setTimeout(() => msg.delete().catch(() => {}), 30000));
     message.delete().catch(() => {});
   }
 
@@ -588,7 +464,7 @@ client.on('messageCreate', async (message) => {
         const ticketId = message.channel.id;
         if (!ticketChannels.has(ticketId)) ticketChannels.set(ticketId, []);
         ticketChannels.get(ticketId).push(newChannel.id);
-        saveData();
+        await saveData();
       }
 
       try {
@@ -622,35 +498,38 @@ client.on('messageCreate', async (message) => {
     await message.delete().catch(() => {});
   }
 
-  // ========== TICKET PANEL ==========
+  // ========== ADMIN PANEL ==========
 
-  if (command === 'ticket') {
-    const fullText = args.join(' ');
-    if (!fullText) return message.reply('Usage: `!ticket Title\nDescription`').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
-    const lines = fullText.split('\n');
-    const title = lines[0];
-    const text = lines.slice(1).join('\n');
+  if (command === 'adminpanel') {
+    if (!canUseCommands) return message.reply('❌ You don\'t have permission!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+
+    const guildGames = gameList.get(message.guild.id) || [];
+
+    if (guildGames.length === 0) {
+      return message.reply('❌ No games added yet! Use `!addgame Game Name` to add games first.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    }
 
     const embed = new EmbedBuilder()
-      .setColor('#00FFFF')
-      .setAuthor({ name: 'Support Ticket System', iconURL: message.guild.iconURL() })
-      .setTitle(`🎫 ${title}`)
-      .setDescription(text || 'Click the button below to create a support ticket')
-      .addFields({ name: '📋 What happens next?', value: 'Our team will assist you shortly', inline: false })
-      .setThumbnail(message.guild.iconURL())
-      .setFooter({ text: 'Click below to get started' })
+      .setColor('#5865F2')
+      .setTitle('🎮 Admin Panel - Price Management')
+      .setDescription('**Manage game prices and announcements**\n\nClick the button below to edit prices for any game.')
+      .addFields(
+        { name: '📋 Available Games', value: guildGames.join('\n') || 'No games yet', inline: false },
+        { name: '✨ Features', value: '✅ Edit prices for any game\n✅ Auto-save changes\n✅ Announcement system\n✅ Change log tracking', inline: false }
+      )
+      .setFooter({ text: 'Admin Panel System' })
       .setTimestamp();
 
     const button = new ButtonBuilder()
-      .setCustomId('create_ticket')
-      .setLabel('Create a Ticket')
-      .setEmoji('🎫')
+      .setCustomId('edit_prices')
+      .setLabel('Edit Prices')
+      .setEmoji('💰')
       .setStyle(ButtonStyle.Primary);
 
     const row = new ActionRowBuilder().addComponents(button);
+
     try {
       await message.delete();
-      await message.channel.send('@everyone');
       await message.channel.send({ embeds: [embed], components: [row] });
     } catch (err) {
       console.error(err);
@@ -663,327 +542,550 @@ client.on('messageCreate', async (message) => {
   if (command === 'help') {
     const helpEmbed = new EmbedBuilder()
       .setColor('#5865F2')
-      .setTitle('🎨 Bot Commands - Complete Guide')
-      .setDescription('**All available commands and features**')
+      .setTitle('🎮 Admin Panel Bot - Complete Guide')
+      .setDescription('**Complete setup and usage guide**')
       .addFields(
-        { name: '📝 Embed Commands', value: '`!embed <msg>` - Basic embed\n`!auto <msg>` - Auto-styled embed\n`!fancy <title>\\n<msg>` - Fancy embed\n`!announce <msg>` - Announcement\n`!quote <msg>` - Quote style\n`!colorembed #HEX <msg>` - Custom color\n`!success <msg>` - Success message\n`!error <msg>` - Error message\n`!info <msg>` - Info message', inline: false },
-        { name: '🎫 Ticket System', value: '`!ticket <title>\\n<desc>` - Create ticket panel\n`!done` - Mark ticket as done\n`!createweb <name>` - Create webhook channel', inline: false },
-        { name: '⚙️ Configuration (Admin Only)', value: '`!concategory <id>` - Set ticket category\n`!conweb <id>` - Set webhook category\n`!conorders <id>` - Set orders log\n`!condone <id>` - Set done log\n`!contranscript <id>` - Set transcript log', inline: false },
-        { name: '👑 Admin Management (Owner Only)', value: '`!admadm <user_id>` - Add admin\n`!admrem <user_id>` - Remove admin\n`!admlist` - List all admins', inline: false },
-        { name: '✨ Features', value: '✅ Anti-duplicate tickets\n✅ Ticket claim system\n✅ Admin-only confirmation\n✅ Auto message cleanup\n✅ Webhook integration\n✅ Transcript logging', inline: false }
+        { name: '⚙️ Setup (Admin Only)', value: '**Step 1:** `!addgame Game Name` - Add games\n**Step 2:** `!conannounce CHANNEL_ID` - Set announcement channel\n**Step 3:** `!concategory CATEGORY_ID` - Set ticket category\n**Step 4:** `!adminpanel` - Create admin panel', inline: false },
+        { name: '🎮 Game Management', value: '`!addgame <name>` - Add a game\n`!removegame <name>` - Remove a game\n`!listgames` - List all games', inline: false },
+        { name: '💰 How to Edit Prices', value: '**1.** Click "Edit Prices" button\n**2.** Select a game from dropdown\n**3.** Click "Create Ticket" to see prices\n**4.** Modal opens to edit prices\n**5.** Submit and announcement is posted!', inline: false },
+        { name: '📝 Example Price Format', value: '```\nDio = 250\nGoku = 300\nVegeta = 350\nBroly = 400\n```', inline: false },
+        { name: '🎫 Ticket Commands', value: '`!done` - Mark ticket as done\n`!createweb <name>` - Create webhook channel', inline: false },
+        { name: '⚙️ Configuration (Admin)', value: '`!concategory <id>` - Ticket category\n`!conweb <id>` - Webhook category\n`!conorders <id>` - Orders log\n`!condone <id>` - Done log', inline: false },
+        { name: '👑 Admin Management (Owner)', value: '`!admadm <id>` - Add admin\n`!admrem <id>` - Remove admin\n`!admlist` - List admins', inline: false }
       )
-      .setFooter({ text: 'Made with ❤️ | Ticket Bot' })
+      .setFooter({ text: 'Made with ❤️ | Admin Panel Bot' })
       .setTimestamp();
     message.reply({ embeds: [helpEmbed] }).then(msg => setTimeout(() => msg.delete().catch(() => {}), 60000));
     message.delete().catch(() => {});
   }
 });
 
-// ==================== BUTTON INTERACTIONS ====================
+// ==================== BUTTON & SELECT MENU INTERACTIONS ====================
 
 client.on('interactionCreate', async (interaction) => {
-  if (interaction.isButton()) {
 
-    // ========== CLAIM TICKET ==========
+  // ========== EDIT PRICES BUTTON ==========
 
-    if (interaction.customId === 'claim_ticket') {
+  if (interaction.isButton() && interaction.customId === 'edit_prices') {
+    const isOwner = interaction.user.id === OWNER_ID;
+    const admins = adminUsers.get(interaction.guild.id) || [];
+    const isAdmin = admins.includes(interaction.user.id);
+
+    if (!isOwner && !isAdmin) {
+      return interaction.reply({ content: '❌ Only admins can edit prices!', ephemeral: true });
+    }
+
+    const guildGames = gameList.get(interaction.guild.id) || [];
+
+    if (guildGames.length === 0) {
+      return interaction.reply({ content: '❌ No games added yet!', ephemeral: true });
+    }
+
+    // Create game selection dropdown (max 25 options)
+    const gameOptions = guildGames.slice(0, 25).map(game => ({
+      label: game,
+      value: game,
+      emoji: '🎮'
+    }));
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('select_game')
+      .setPlaceholder('Select a game to view/edit prices')
+      .addOptions(gameOptions);
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    await interaction.reply({
+      content: '**Select a game to view/edit prices:**',
+      components: [row],
+      ephemeral: true
+    });
+  }
+
+  // ========== GAME SELECTION - SHOW PRICES & CREATE TICKET BUTTON ==========
+
+  if (interaction.isStringSelectMenu() && interaction.customId === 'select_game') {
+    const selectedGame = interaction.values[0];
+    const guildId = interaction.guild.id;
+
+    // Get current prices for this game
+    const currentPrices = gamePrices.get(`${guildId}_${selectedGame}`) || 'No prices set yet!';
+
+    const embed = new EmbedBuilder()
+      .setColor('#00FFFF')
+      .setTitle(`💰 ${selectedGame} - Current Prices`)
+      .setDescription('```\n' + currentPrices + '\n```')
+      .setFooter({ text: 'Click below to create a ticket or edit prices' })
+      .setTimestamp();
+
+    const createTicketButton = new ButtonBuilder()
+      .setCustomId(`create_ticket_${selectedGame}`)
+      .setLabel('Create Ticket')
+      .setEmoji('🎫')
+      .setStyle(ButtonStyle.Primary);
+
+    const editPricesButton = new ButtonBuilder()
+      .setCustomId(`edit_price_modal_${selectedGame}`)
+      .setLabel('Edit Prices')
+      .setEmoji('✏️')
+      .setStyle(ButtonStyle.Success);
+
+    const row = new ActionRowBuilder().addComponents(createTicketButton, editPricesButton);
+
+    await interaction.update({
+      content: '',
+      embeds: [embed],
+      components: [row]
+    });
+  }
+
+  // ========== CREATE TICKET BUTTON ==========
+
+  if (interaction.isButton() && interaction.customId.startsWith('create_ticket_')) {
+    const gameName = interaction.customId.replace('create_ticket_', '');
+    const categoryId = ticketCategories.get(interaction.guild.id);
+
+    if (!categoryId) return interaction.reply({ content: '❌ Ticket category not set! Use `!concategory CATEGORY_ID`', ephemeral: true });
+
+    const category = interaction.guild.channels.cache.get(categoryId);
+    if (!category) return interaction.reply({ content: '❌ Category not found!', ephemeral: true });
+
+    const existingTicket = interaction.guild.channels.cache.find(ch => 
+      ch.name === `ticket-${interaction.user.username.toLowerCase()}` && 
+      ch.parentId === categoryId
+    );
+
+    if (existingTicket) return interaction.reply({ content: `❌ You already have a ticket: <#${existingTicket.id}>`, ephemeral: true });
+
+    await interaction.deferReply({ ephemeral: true });
+
+    try {
+      const ticketChannel = await interaction.guild.channels.create({
+        name: `ticket-${interaction.user.username}`,
+        type: ChannelType.GuildText,
+        parent: categoryId,
+        permissionOverwrites: [
+          { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+          { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
+        ],
+      });
+
+      const staffRole = interaction.guild.roles.cache.find(r => 
+        r.name.toLowerCase().includes('staff') || 
+        r.name.toLowerCase().includes('admin') || 
+        r.name.toLowerCase().includes('mod')
+      );
+
+      if (staffRole) {
+        await ticketChannel.permissionOverwrites.create(staffRole, { 
+          ViewChannel: true, 
+          SendMessages: true, 
+          ReadMessageHistory: true 
+        });
+      }
+
+      // Add owner and admin permissions
+      try {
+        await interaction.guild.members.fetch(OWNER_ID);
+        await ticketChannel.permissionOverwrites.create(OWNER_ID, { 
+          ViewChannel: true, 
+          SendMessages: true, 
+          ReadMessageHistory: true 
+        });
+      } catch (err) {
+        console.log('⚠️ Owner not in guild');
+      }
+
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      for (const adminId of admins) {
+        try {
+          await interaction.guild.members.fetch(adminId);
+          await ticketChannel.permissionOverwrites.create(adminId, { 
+            ViewChannel: true, 
+            SendMessages: true, 
+            ReadMessageHistory: true 
+          });
+        } catch (err) {
+          console.log(`⚠️ Admin ${adminId} not in guild`);
+        }
+      }
+
+      const claimButton = new ButtonBuilder()
+        .setCustomId('claim_ticket')
+        .setLabel('Claim Ticket')
+        .setEmoji('🎯')
+        .setStyle(ButtonStyle.Primary);
+
+      const doneButton = new ButtonBuilder()
+        .setCustomId('done_ticket')
+        .setLabel('Done')
+        .setEmoji('✅')
+        .setStyle(ButtonStyle.Success);
+
+      const closeButton = new ButtonBuilder()
+        .setCustomId('close_ticket')
+        .setLabel('Close')
+        .setEmoji('🔒')
+        .setStyle(ButtonStyle.Danger);
+
+      const row = new ActionRowBuilder().addComponents(claimButton, doneButton, closeButton);
+
+      const currentPrices = gamePrices.get(`${interaction.guild.id}_${gameName}`) || 'No prices set yet!';
+
+      await ticketChannel.send({ 
+        content: `@everyone\n\n🎫 **Ticket by ${interaction.user}**\n\n**Game:** ${gameName}\n\n**Current Prices:**\n\`\`\`\n${currentPrices}\n\`\`\``, 
+        components: [row], 
+        allowedMentions: { parse: ['everyone'] } 
+      });
+
+      ticketOwners.set(ticketChannel.id, interaction.user.id);
+      await saveData();
+
+      const orderChannelId = orderChannels.get(interaction.guild.id);
+      if (orderChannelId) {
+        const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
+        if (orderChannel) {
+          const orderTimestamp = Math.floor(Date.now() / 1000);
+          const orderEmbed = new EmbedBuilder()
+            .setColor('#FF6B35')
+            .setAuthor({ name: '📦 New Order!', iconURL: interaction.guild.iconURL() })
+            .setTitle(`Order from ${interaction.user.tag}`)
+            .setDescription(`🎉 **New order placed!**\n\n**Game:** ${gameName}\n\n**Prices:**\n\`\`\`\n${currentPrices}\n\`\`\``)
+            .addFields(
+              { name: '👤 Customer', value: `${interaction.user}`, inline: true },
+              { name: '⏰ Ordered', value: `<t:${orderTimestamp}:F>`, inline: false }
+            )
+            .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
+            .setTimestamp();
+          await orderChannel.send({ embeds: [orderEmbed] });
+        }
+      }
+
+      await interaction.editReply({ content: `✅ Ticket created! <#${ticketChannel.id}>` });
+    } catch (err) {
+      console.error('Ticket Creation Error:', err);
+      await interaction.editReply({ content: '❌ Failed to create ticket!' });
+    }
+  }
+
+  // ========== EDIT PRICE MODAL BUTTON ==========
+
+  if (interaction.isButton() && interaction.customId.startsWith('edit_price_modal_')) {
+    const isOwner = interaction.user.id === OWNER_ID;
+    const admins = adminUsers.get(interaction.guild.id) || [];
+    const isAdmin = admins.includes(interaction.user.id);
+
+    if (!isOwner && !isAdmin) {
+      return interaction.reply({ content: '❌ Only admins can edit prices!', ephemeral: true });
+    }
+
+    const gameName = interaction.customId.replace('edit_price_modal_', '');
+    const guildId = interaction.guild.id;
+
+    // Get current prices for this game
+    const currentPrices = gamePrices.get(`${guildId}_${gameName}`) || '';
+
+    // Create modal with two fields
+    const modal = new ModalBuilder()
+      .setCustomId(`price_modal_${gameName}`)
+      .setTitle(`Edit Prices - ${gameName}`);
+
+    const priceInput = new TextInputBuilder()
+      .setCustomId('price_list')
+      .setLabel('Price List')
+      .setPlaceholder('Dio = 250\nGoku = 300\nVegeta = 350')
+      .setStyle(TextInputStyle.Paragraph)
+      .setValue(currentPrices)
+      .setRequired(true);
+
+    const changeLogInput = new TextInputBuilder()
+      .setCustomId('change_log')
+      .setLabel('What did you update?')
+      .setPlaceholder('Added: Vegeta = 350, Broly = 400\nUpdated: Goku 250 → 300')
+      .setStyle(TextInputStyle.Paragraph)
+      .setRequired(true);
+
+    const firstRow = new ActionRowBuilder().addComponents(priceInput);
+    const secondRow = new ActionRowBuilder().addComponents(changeLogInput);
+
+    modal.addComponents(firstRow, secondRow);
+
+    await interaction.showModal(modal);
+  }
+
+  // ========== CLAIM TICKET ==========
+
+  if (interaction.isButton() && interaction.customId === 'claim_ticket') {
+    const isOwner = interaction.user.id === OWNER_ID;
+    const admins = adminUsers.get(interaction.guild.id) || [];
+    const isAdmin = admins.includes(interaction.user.id);
+
+    if (!isOwner && !isAdmin) {
+      return interaction.reply({ content: '❌ Only admins can claim tickets!', ephemeral: true });
+    }
+
+    const ticketId = interaction.channel.id;
+    const alreadyClaimed = ticketClaims.get(ticketId);
+
+    if (alreadyClaimed) {
+      return interaction.reply({ content: `❌ This ticket has already been claimed by <@${alreadyClaimed}>!`, ephemeral: true });
+    }
+
+    ticketClaims.set(ticketId, interaction.user.id);
+    await saveData();
+
+    const claimEmbed = new EmbedBuilder()
+      .setColor('#00FF00')
+      .setTitle('🎯 Ticket Claimed')
+      .setDescription(`**${interaction.user}** has claimed this ticket!`)
+      .setTimestamp();
+
+    await interaction.update({ 
+      content: `${interaction.user} has claimed this ticket!`, 
+      embeds: [claimEmbed],
+      components: [] 
+    });
+
+    await interaction.channel.send(`🎯 **Admin ${interaction.user} has claimed this ticket and will be assisting you!**`);
+  }
+
+  // ========== CLOSE TICKET ==========
+
+  if (interaction.isButton() && interaction.customId === 'close_ticket') {
+    if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
+    await interaction.reply('🔒 Closing in 5 seconds...');
+    setTimeout(async () => {
+      const ticketId = interaction.channel.id;
+      const createdChannels = ticketChannels.get(ticketId) || [];
+      for (const channelId of createdChannels) {
+        const channelToDelete = interaction.guild.channels.cache.get(channelId);
+        if (channelToDelete) await channelToDelete.delete().catch(console.error);
+      }
+      ticketChannels.delete(ticketId);
+      ticketOwners.delete(ticketId);
+      ticketClaims.delete(ticketId);
+      await saveData();
+      await interaction.channel.delete().catch(console.error);
+    }, 5000);
+  }
+
+  // ========== DONE TICKET ==========
+
+  if (interaction.isButton() && interaction.customId === 'done_ticket') {
+    if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
+    const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
+    const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+    if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only ticket creator!', ephemeral: true });
+    const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
+    const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
+    const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
+    await interaction.reply({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
+  }
+
+  // ========== OWNER DONE CONFIRMATION ==========
+
+  if (interaction.isButton() && interaction.customId === 'owner_done_confirmation') {
+    if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
+    const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
+    const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+    if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only creator!', ephemeral: true });
+    const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
+    const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
+    const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
+    await interaction.update({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
+  }
+
+  // ========== OWNER CANCEL DONE ==========
+
+  if (interaction.isButton() && interaction.customId === 'owner_cancel_done') {
+    if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
+    await interaction.update({ content: `❌ **${interaction.user}** cancelled.\n\nTicket remains open.`, components: [] });
+  }
+
+  // ========== CONFIRM DONE ==========
+
+  if (interaction.isButton() && interaction.customId === 'confirm_done') {
+    const ticketId = interaction.channel.id;
+    const claimedBy = ticketClaims.get(ticketId);
+
+    // Check if ticket was claimed and if the current user is the one who claimed it
+    if (claimedBy && claimedBy !== interaction.user.id) {
+      return interaction.reply({ content: `❌ Only <@${claimedBy}> (who claimed this ticket) can confirm!`, ephemeral: true });
+    }
+
+    // If not claimed, allow any admin
+    if (!claimedBy) {
       const isOwner = interaction.user.id === OWNER_ID;
       const admins = adminUsers.get(interaction.guild.id) || [];
       const isAdmin = admins.includes(interaction.user.id);
+      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
+    }
 
-      if (!isOwner && !isAdmin) {
-        return interaction.reply({ content: '❌ Only admins can claim tickets!', ephemeral: true });
+    const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
+    const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
+
+    let serviceDescription = 'N/A';
+    let gameName = 'Unknown Game';
+    try {
+      const messages = await interaction.channel.messages.fetch({ limit: 50 });
+      const messagesArray = Array.from(messages.values()).reverse();
+
+      for (const msg of messagesArray) {
+        if (msg.content && msg.content.includes('**Game:**')) {
+          const parts = msg.content.split('**Game:**');
+          if (parts.length > 1) {
+            gameName = parts[1].split('\n')[0].trim();
+          }
+        }
+        if (msg.content && msg.content.includes('Service Request:')) {
+          const parts = msg.content.split('Service Request:');
+          if (parts.length > 1) {
+            serviceDescription = parts[1].trim().split('\n')[0].trim();
+          }
+        }
       }
+    } catch (err) {
+      console.error('Error fetching service description:', err);
+    }
 
-      const ticketId = interaction.channel.id;
-      const alreadyClaimed = ticketClaims.get(ticketId);
+    const doneChannelId = doneChannels.get(interaction.guild.id);
+    if (doneChannelId) {
+      const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
+      if (doneChannel) {
+        const currentTimestamp = Math.floor(Date.now() / 1000);
+        const doneEmbed = new EmbedBuilder()
+          .setColor('#00FF7F')
+          .setAuthor({ name: '✅ Service Completed', iconURL: interaction.guild.iconURL() })
+          .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!`)
+          .setDescription(`🎉 **Service successfully delivered and confirmed!**\n\n**Game:** ${gameName}\n\n📦 **Service Details:**\n${serviceDescription}`)
+          .addFields(
+            { name: '👤 Customer', value: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, inline: true },
+            { name: '✅ Confirmed By', value: `${interaction.user}`, inline: true },
+            { name: '⏰ Completed At', value: `<t:${currentTimestamp}:F>\n(<t:${currentTimestamp}:R>)`, inline: false }
+          )
+          .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ size: 256 }) : null)
+          .setImage(interaction.user.displayAvatarURL({ size: 512 }))
+          .setFooter({ text: `Admin: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
+          .setTimestamp();
 
-      if (alreadyClaimed) {
-        return interaction.reply({ content: `❌ This ticket has already been claimed by <@${alreadyClaimed}>!`, ephemeral: true });
+        try {
+          const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
+          await sentMessage.react('✅');
+          await sentMessage.react('🎉');
+          console.log(`✅ Sent done log to channel ${doneChannelId}`);
+        } catch (err) {
+          console.error('Error sending to done channel:', err);
+        }
       }
-
-      ticketClaims.set(ticketId, interaction.user.id);
+    }
+    await interaction.update({ content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, components: [] });
+    setTimeout(async () => {
+      const createdChannels = ticketChannels.get(ticketId) || [];
+      for (const channelId of createdChannels) {
+        const channelToDelete = interaction.guild.channels.cache.get(channelId);
+        if (channelToDelete) await channelToDelete.delete().catch(console.error);
+      }
+      ticketChannels.delete(ticketId);
+      ticketOwners.delete(ticketId);
+      ticketClaims.delete(ticketId);
       await saveData();
+      await interaction.channel.delete().catch(console.error);
+    }, 5000);
+  }
 
-      const claimEmbed = new EmbedBuilder()
-        .setColor('#00FF00')
-        .setTitle('🎯 Ticket Claimed')
-        .setDescription(`**${interaction.user}** has claimed this ticket!`)
-        .setTimestamp();
+  // ========== DENY DONE ==========
 
-      await interaction.update({ 
-        content: `${interaction.user} has claimed this ticket!`, 
-        embeds: [claimEmbed],
-        components: [] 
-      });
+  if (interaction.isButton() && interaction.customId === 'deny_done') {
+    const ticketId = interaction.channel.id;
+    const claimedBy = ticketClaims.get(ticketId);
 
-      await interaction.channel.send(`🎯 **Admin ${interaction.user} has claimed this ticket and will be assisting you!**`);
+    // Check if ticket was claimed and if the current user is the one who claimed it
+    if (claimedBy && claimedBy !== interaction.user.id) {
+      return interaction.reply({ content: `❌ Only <@${claimedBy}> (who claimed this ticket) can deny!`, ephemeral: true });
     }
 
-    // ========== CREATE TICKET ==========
-
-    if (interaction.customId === 'create_ticket') {
-      const categoryId = ticketCategories.get(interaction.guild.id);
-      if (!categoryId) return interaction.reply({ content: '❌ Category not set!', ephemeral: true });
-      const category = interaction.guild.channels.cache.get(categoryId);
-      if (!category) return interaction.reply({ content: '❌ Category not found!', ephemeral: true });
-      const existingTicket = interaction.guild.channels.cache.find(ch => ch.name === `ticket-${interaction.user.username.toLowerCase()}` && ch.parentId === categoryId);
-      if (existingTicket) return interaction.reply({ content: `❌ You have a ticket: <#${existingTicket.id}>`, ephemeral: true });
-      const modal = new ModalBuilder().setCustomId('ticket_modal').setTitle('Create Ticket');
-      const serviceInput = new TextInputBuilder().setCustomId('service_type').setLabel('What Service You Will Avail?').setPlaceholder('Describe your service').setStyle(TextInputStyle.Paragraph).setRequired(true);
-      const actionRow = new ActionRowBuilder().addComponents(serviceInput);
-      modal.addComponents(actionRow);
-      await interaction.showModal(modal);
+    // If not claimed, allow any admin
+    if (!claimedBy) {
+      const isOwner = interaction.user.id === OWNER_ID;
+      const admins = adminUsers.get(interaction.guild.id) || [];
+      const isAdmin = admins.includes(interaction.user.id);
+      if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
     }
 
-    // ========== CLOSE TICKET ==========
-
-    if (interaction.customId === 'close_ticket') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
-      await interaction.reply('🔒 Closing in 5 seconds...');
-      setTimeout(async () => {
-        const ticketId = interaction.channel.id;
-        const createdChannels = ticketChannels.get(ticketId) || [];
-        for (const channelId of createdChannels) {
-          const channelToDelete = interaction.guild.channels.cache.get(channelId);
-          if (channelToDelete) await channelToDelete.delete().catch(console.error);
-        }
-        ticketChannels.delete(ticketId);
-        ticketOwners.delete(ticketId);
-        ticketClaims.delete(ticketId);
-        await saveData();
-        await interaction.channel.delete().catch(console.error);
-      }, 5000);
-    }
-
-    // ========== DONE TICKET ==========
-
-    if (interaction.customId === 'done_ticket') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
-      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
-      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-      if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only ticket creator!', ephemeral: true });
-      const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-      const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
-      const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
-      await interaction.reply({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
-    }
-
-    // ========== OWNER DONE CONFIRMATION ==========
-
-    if (interaction.customId === 'owner_done_confirmation') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
-      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
-      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-      if (ticketOwner && interaction.user.id !== ticketOwner.id) return interaction.reply({ content: '❌ Only creator!', ephemeral: true });
-      const confirmButton = new ButtonBuilder().setCustomId('confirm_done').setLabel('Confirm Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-      const denyButton = new ButtonBuilder().setCustomId('deny_done').setLabel('Deny').setEmoji('❌').setStyle(ButtonStyle.Danger);
-      const confirmRow = new ActionRowBuilder().addComponents(confirmButton, denyButton);
-      await interaction.update({ content: `⏳ **${interaction.user}** marked done!\n\n**Admins:** Please confirm.`, components: [confirmRow] });
-    }
-
-    // ========== OWNER CANCEL DONE ==========
-
-    if (interaction.customId === 'owner_cancel_done') {
-      if (!interaction.channel.name.startsWith('ticket-')) return interaction.reply({ content: '❌ Not a ticket!', ephemeral: true });
-      await interaction.update({ content: `❌ **${interaction.user}** cancelled.\n\nTicket remains open.`, components: [] });
-    }
-
-    // ========== CONFIRM DONE ==========
-
-    if (interaction.customId === 'confirm_done') {
-      const ticketId = interaction.channel.id;
-      const claimedBy = ticketClaims.get(ticketId);
-
-      // Check if ticket was claimed and if the current user is the one who claimed it
-      if (claimedBy && claimedBy !== interaction.user.id) {
-        return interaction.reply({ content: `❌ Only <@${claimedBy}> (who claimed this ticket) can confirm!`, ephemeral: true });
-      }
-
-      // If not claimed, allow any admin
-      if (!claimedBy) {
-        const isOwner = interaction.user.id === OWNER_ID;
-        const admins = adminUsers.get(interaction.guild.id) || [];
-        const isAdmin = admins.includes(interaction.user.id);
-        if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-      }
-
-      const ticketOwnerName = interaction.channel.name.replace('ticket-', '');
-      const ticketOwner = interaction.guild.members.cache.find(m => m.user.username.toLowerCase() === ticketOwnerName.toLowerCase());
-
-      let serviceDescription = 'N/A';
-      try {
-        const messages = await interaction.channel.messages.fetch({ limit: 50 });
-        const messagesArray = Array.from(messages.values()).reverse();
-
-        for (const msg of messagesArray) {
-          if (msg.content && msg.content.includes('Service Request:')) {
-            const parts = msg.content.split('Service Request:');
-            if (parts.length > 1) {
-              serviceDescription = parts[1].trim().split('\n')[0].trim();
-              break;
-            }
-          }
-        }
-      } catch (err) {
-        console.error('Error fetching service description:', err);
-      }
-
-      const doneChannelId = doneChannels.get(interaction.guild.id);
-      if (doneChannelId) {
-        const doneChannel = interaction.guild.channels.cache.get(doneChannelId);
-        if (doneChannel) {
-          const currentTimestamp = Math.floor(Date.now() / 1000);
-          const doneEmbed = new EmbedBuilder()
-            .setColor('#00FF7F')
-            .setAuthor({ name: '✅ Service Completed', iconURL: interaction.guild.iconURL() })
-            .setTitle(`${ticketOwner ? ticketOwner.user.tag : ticketOwnerName} received their service!`)
-            .setDescription(`🎉 **Service successfully delivered and confirmed!**\n\n📦 **Service Details:**\n${serviceDescription}`)
-            .addFields(
-              { name: '👤 Customer', value: `${ticketOwner ? ticketOwner.user : ticketOwnerName}`, inline: true },
-              { name: '✅ Confirmed By', value: `${interaction.user}`, inline: true },
-              { name: '⏰ Completed At', value: `<t:${currentTimestamp}:F>\n(<t:${currentTimestamp}:R>)`, inline: false }
-            )
-            .setThumbnail(ticketOwner ? ticketOwner.user.displayAvatarURL({ size: 256 }) : null)
-            .setImage(interaction.user.displayAvatarURL({ size: 512 }))
-            .setFooter({ text: `Admin: ${interaction.user.tag}`, iconURL: interaction.user.displayAvatarURL() })
-            .setTimestamp();
-
-          try {
-            const sentMessage = await doneChannel.send({ embeds: [doneEmbed] });
-            await sentMessage.react('✅');
-            await sentMessage.react('🎉');
-            console.log(`✅ Sent done log to channel ${doneChannelId}`);
-          } catch (err) {
-            console.error('Error sending to done channel:', err);
-          }
-        }
-      }
-      await interaction.update({ content: `✅ **Confirmed by ${interaction.user}!**\n\nClosing in 5 seconds...`, components: [] });
-      setTimeout(async () => {
-        const createdChannels = ticketChannels.get(ticketId) || [];
-        for (const channelId of createdChannels) {
-          const channelToDelete = interaction.guild.channels.cache.get(channelId);
-          if (channelToDelete) await channelToDelete.delete().catch(console.error);
-        }
-        ticketChannels.delete(ticketId);
-        ticketOwners.delete(ticketId);
-        ticketClaims.delete(ticketId);
-        await saveData();
-        await interaction.channel.delete().catch(console.error);
-      }, 5000);
-    }
-
-    // ========== DENY DONE ==========
-
-    if (interaction.customId === 'deny_done') {
-      const ticketId = interaction.channel.id;
-      const claimedBy = ticketClaims.get(ticketId);
-
-      // Check if ticket was claimed and if the current user is the one who claimed it
-      if (claimedBy && claimedBy !== interaction.user.id) {
-        return interaction.reply({ content: `❌ Only <@${claimedBy}> (who claimed this ticket) can deny!`, ephemeral: true });
-      }
-
-      // If not claimed, allow any admin
-      if (!claimedBy) {
-        const isOwner = interaction.user.id === OWNER_ID;
-        const admins = adminUsers.get(interaction.guild.id) || [];
-        const isAdmin = admins.includes(interaction.user.id);
-        if (!isOwner && !isAdmin) return interaction.reply({ content: '❌ Only admins!', ephemeral: true });
-      }
-
-      await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
-    }
+    await interaction.update({ content: `❌ **Denied by ${interaction.user}.**\n\nNot complete yet.`, components: [] });
   }
 
   // ==================== MODAL SUBMISSIONS ====================
 
-  if (interaction.isModalSubmit()) {
+  if (interaction.isModalSubmit() && interaction.customId.startsWith('price_modal_')) {
+    await interaction.deferReply({ ephemeral: true });
 
-    // ========== TICKET MODAL ==========
+    const gameName = interaction.customId.replace('price_modal_', '');
+    const priceList = interaction.fields.getTextInputValue('price_list');
+    const changeLog = interaction.fields.getTextInputValue('change_log');
+    const guildId = interaction.guild.id;
 
-    if (interaction.customId === 'ticket_modal') {
-      // Defer the reply immediately to avoid timeout
-      await interaction.deferReply({ ephemeral: true });
+    // Save the updated prices
+    gamePrices.set(`${guildId}_${gameName}`, priceList);
+    await saveData();
 
-      const serviceDescription = interaction.fields.getTextInputValue('service_type');
-      const categoryId = ticketCategories.get(interaction.guild.id);
+    // Get announcement channel
+    const announceChannelId = announcementChannel.get(guildId);
 
-      if (!categoryId) {
-        return interaction.editReply({ content: '❌ Ticket category not configured!' });
-      }
+    if (!announceChannelId) {
+      return interaction.editReply({
+        content: '❌ Announcement channel not set! Use `!conannounce CHANNEL_ID` first.'
+      });
+    }
 
-      try {
-        const ticketChannel = await interaction.guild.channels.create({
-          name: `ticket-${interaction.user.username}`,
-          type: ChannelType.GuildText,
-          parent: categoryId,
-          permissionOverwrites: [
-            { id: interaction.guild.id, deny: [PermissionFlagsBits.ViewChannel] },
-            { id: interaction.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-            { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] },
-          ],
-        });
+    const announceChannel = interaction.guild.channels.cache.get(announceChannelId);
 
-        const staffRole = interaction.guild.roles.cache.find(r => r.name.toLowerCase().includes('staff') || r.name.toLowerCase().includes('admin') || r.name.toLowerCase().includes('mod'));
-        if (staffRole) {
-          await ticketChannel.permissionOverwrites.create(staffRole, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        }
+    if (!announceChannel) {
+      return interaction.editReply({
+        content: '❌ Announcement channel not found!'
+      });
+    }
 
-        // Add owner and admin permissions
-        try {
-          await interaction.guild.members.fetch(OWNER_ID);
-          await ticketChannel.permissionOverwrites.create(OWNER_ID, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-        } catch (err) {
-          console.log('⚠️ Owner not in guild');
-        }
+    // Create announcement
+    const announcement = `@everyone
 
-        const admins = adminUsers.get(interaction.guild.id) || [];
-        for (const adminId of admins) {
-          try {
-            await interaction.guild.members.fetch(adminId);
-            await ticketChannel.permissionOverwrites.create(adminId, { ViewChannel: true, SendMessages: true, ReadMessageHistory: true });
-          } catch (err) {
-            console.log(`⚠️ Admin ${adminId} not in guild`);
-          }
-        }
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📝 **Price List Updated**
+🎮 **${gameName}**
 
-        const claimButton = new ButtonBuilder().setCustomId('claim_ticket').setLabel('Claim Ticket').setEmoji('🎯').setStyle(ButtonStyle.Primary);
-        const doneButton = new ButtonBuilder().setCustomId('done_ticket').setLabel('Done').setEmoji('✅').setStyle(ButtonStyle.Success);
-        const closeButton = new ButtonBuilder().setCustomId('close_ticket').setLabel('Close').setEmoji('🔒').setStyle(ButtonStyle.Danger);
-        const row = new ActionRowBuilder().addComponents(claimButton, doneButton, closeButton);
+${interaction.user} has updated the price list!
 
-        await ticketChannel.send({ content: `@everyone\n\n🎫 **Ticket by ${interaction.user}**\n\n**Service Request:**\n${serviceDescription}`, components: [row], allowedMentions: { parse: ['everyone'] } });
+📋 **What Changed?**
+\`\`\`
+${changeLog}
+\`\`\`
 
-        ticketOwners.set(ticketChannel.id, interaction.user.id);
-        await saveData();
+💰 **Updated Price List**
+\`\`\`
+${priceList}
+\`\`\`
 
-        const orderChannelId = orderChannels.get(interaction.guild.id);
-        if (orderChannelId) {
-          const orderChannel = interaction.guild.channels.cache.get(orderChannelId);
-          if (orderChannel) {
-            const orderTimestamp = Math.floor(Date.now() / 1000);
-            const orderEmbed = new EmbedBuilder()
-              .setColor('#FF6B35')
-              .setAuthor({ name: '📦 New Order!', iconURL: interaction.guild.iconURL() })
-              .setTitle(`Order from ${interaction.user.tag}`)
-              .setDescription(`🎉 **New order placed!**\n\n📋 **Details:**\n${serviceDescription}`)
-              .addFields(
-                { name: '👤 Customer', value: `${interaction.user}`, inline: true },
-                { name: '⏰ Ordered', value: `<t:${orderTimestamp}:F>`, inline: false }
-              )
-              .setThumbnail(interaction.user.displayAvatarURL({ size: 256 }))
-              .setTimestamp();
-            await orderChannel.send({ embeds: [orderEmbed] });
-          }
-        }
+Updated by ${interaction.user.tag}
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━`;
 
-        await interaction.editReply({ content: `✅ Ticket created! <#${ticketChannel.id}>` });
-      } catch (err) {
-        console.error('Ticket Creation Error:', err);
-        await interaction.editReply({ content: '❌ Failed to create ticket!' });
-      }
+    try {
+      const sentMessage = await announceChannel.send({
+        content: announcement,
+        allowedMentions: { parse: ['everyone'] }
+      });
+
+      await sentMessage.react('💰');
+      await sentMessage.react('✅');
+
+      await interaction.editReply({
+        content: `✅ **Price list updated successfully!**\n\n🎮 Game: **${gameName}**\n📢 Announcement posted in <#${announceChannelId}>`
+      });
+    } catch (err) {
+      console.error('Error posting announcement:', err);
+      await interaction.editReply({
+        content: '❌ Failed to post announcement! Check bot permissions.'
+      });
     }
   }
 });
