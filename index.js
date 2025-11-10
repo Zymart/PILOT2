@@ -498,6 +498,44 @@ client.on('messageCreate', async (message) => {
     await message.delete().catch(() => {});
   }
 
+  // ========== PUBLIC PANEL ==========
+
+  if (command === 'panel') {
+    const guildGames = gameList.get(message.guild.id) || [];
+
+    if (guildGames.length === 0) {
+      return message.reply('❌ No games added yet! Admins need to use `!addgame Game Name` first.').then(msg => setTimeout(() => msg.delete().catch(() => {}), 10000));
+    }
+
+    const embed = new EmbedBuilder()
+      .setColor('#00FFFF')
+      .setTitle('🎮 Game Panel - View Prices & Create Tickets')
+      .setDescription('**Welcome to our game service!**\n\nSelect a game below to view current prices and create a ticket.')
+      .addFields(
+        { name: '📋 Available Games', value: guildGames.join('\n') || 'No games yet', inline: false },
+        { name: '✨ How It Works', value: '1️⃣ Click "View Games" button\n2️⃣ Select your game\n3️⃣ See current prices\n4️⃣ Click "Create Ticket" to order', inline: false }
+      )
+      .setFooter({ text: 'Select a game to get started!' })
+      .setTimestamp();
+
+    const button = new ButtonBuilder()
+      .setCustomId('view_games')
+      .setLabel('View Games')
+      .setEmoji('🎮')
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(button);
+
+    try {
+      await message.delete();
+      await message.channel.send('@everyone');
+      await message.channel.send({ embeds: [embed], components: [row] });
+    } catch (err) {
+      console.error(err);
+      message.reply('❌ Failed!').then(msg => setTimeout(() => msg.delete().catch(() => {}), 5000));
+    }
+  }
+
   // ========== ADMIN PANEL ==========
 
   if (command === 'adminpanel') {
@@ -563,6 +601,67 @@ client.on('messageCreate', async (message) => {
 // ==================== BUTTON & SELECT MENU INTERACTIONS ====================
 
 client.on('interactionCreate', async (interaction) => {
+
+  // ========== VIEW GAMES BUTTON (PUBLIC PANEL) ==========
+
+  if (interaction.isButton() && interaction.customId === 'view_games') {
+    const guildGames = gameList.get(interaction.guild.id) || [];
+
+    if (guildGames.length === 0) {
+      return interaction.reply({ content: '❌ No games available yet!', ephemeral: true });
+    }
+
+    // Create game selection dropdown (max 25 options)
+    const gameOptions = guildGames.slice(0, 25).map(game => ({
+      label: game,
+      value: `public_${game}`,
+      emoji: '🎮'
+    }));
+
+    const selectMenu = new StringSelectMenuBuilder()
+      .setCustomId('select_game_public')
+      .setPlaceholder('Select a game to view prices')
+      .addOptions(gameOptions);
+
+    const row = new ActionRowBuilder().addComponents(selectMenu);
+
+    await interaction.reply({
+      content: '**Select a game to view prices and create a ticket:**',
+      components: [row],
+      ephemeral: true
+    });
+  }
+
+  // ========== PUBLIC GAME SELECTION ==========
+
+  if (interaction.isStringSelectMenu() && interaction.customId === 'select_game_public') {
+    const selectedGame = interaction.values[0].replace('public_', '');
+    const guildId = interaction.guild.id;
+
+    // Get current prices for this game
+    const currentPrices = gamePrices.get(`${guildId}_${selectedGame}`) || 'No prices set yet!';
+
+    const embed = new EmbedBuilder()
+      .setColor('#00FFFF')
+      .setTitle(`💰 ${selectedGame} - Current Prices`)
+      .setDescription('```\n' + currentPrices + '\n```')
+      .setFooter({ text: 'Click below to create a ticket' })
+      .setTimestamp();
+
+    const createTicketButton = new ButtonBuilder()
+      .setCustomId(`create_ticket_${selectedGame}`)
+      .setLabel('Create Ticket')
+      .setEmoji('🎫')
+      .setStyle(ButtonStyle.Primary);
+
+    const row = new ActionRowBuilder().addComponents(createTicketButton);
+
+    await interaction.update({
+      content: '',
+      embeds: [embed],
+      components: [row]
+    });
+  }
 
   // ========== EDIT PRICES BUTTON ==========
 
